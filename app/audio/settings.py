@@ -15,6 +15,19 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields, replace
 
+# Graphic EQ bands: (centre Hz, label, filter kind). Octave spacing over the voice range.
+EQ_BANDS: list[tuple[float, str, str]] = [
+    (80.0, "Low end", "lowshelf"),
+    (160.0, "Warmth", "peak"),
+    (320.0, "Body", "peak"),
+    (640.0, "Boxiness", "peak"),
+    (1250.0, "Nasal", "peak"),
+    (2500.0, "Clarity", "peak"),
+    (5000.0, "Presence", "peak"),
+    (10000.0, "Air", "highshelf"),
+]
+EQ_RANGE_DB = 12.0
+
 import numpy as np
 
 from .analyzer import AnalysisResult
@@ -40,7 +53,16 @@ class ProcessingSettings:
     # de-reverb
     reverb_reduction: float = 0.3
     echo_reduction: float = 0.15
+    # neural voice re-synthesis (0 = off)
+    resynthesis: float = 0.0
+    # EQ & tonal balance
+    tonal_balance: float = 0.5  # 0..1 automatic match toward a natural voice balance
+    eq_tilt: float = 0.0  # -1 (darker) .. +1 (brighter)
+    eq_gains: list = field(default_factory=lambda: [0.0] * len(EQ_BANDS))  # dB per band
     # dynamics
+    leveler_amount: float = 0.4
+    leveler_range_db: float = 10.0
+    leveler_speed_s: float = 2.0
     compressor_amount: float = 0.45
     comp_threshold_db: float = -24.0
     comp_ratio: float = 2.5
@@ -64,6 +86,7 @@ class ProcessingSettings:
         return cls(**{k: v for k, v in data.items() if k in known})
 
     def copy(self, **changes) -> "ProcessingSettings":
+        changes.setdefault("eq_gains", list(self.eq_gains))
         return replace(self, **changes)
 
 
@@ -81,21 +104,24 @@ class Preset:
     hf_clarity: float = 0.0
     gate_db: float = -80.0
     max_attenuation_db: float | None = None
+    resynthesis: float = 0.0
+    leveler: float = 0.4
 
 
 PRESETS: dict[str, Preset] = {p.name: p for p in [
     Preset("Natural", "Minimal processing. Keeps the room and the voice as they are, just cleaner.",
-           0.25, 0.25, 0.15, 0.25, 2.0, -22.0),
+           0.25, 0.25, 0.15, 0.25, 2.0, -22.0, leveler=0.2),
     Preset("Clean Voice", "Balanced cleanup for most recordings.",
-           0.5, 0.5, 0.3, 0.45, 2.5, -24.0),
+           0.5, 0.5, 0.3, 0.45, 2.5, -24.0, leveler=0.4),
     Preset("Noisy Recording", "Strong noise reduction for fans, traffic and busy rooms.",
-           0.8, 0.45, 0.3, 0.45, 2.5, -24.0),
-    Preset("Interview", "Moderate noise reduction, clearer speech, even levels.",
-           0.6, 0.55, 0.35, 0.55, 2.5, -24.0, presence=0.1),
+           0.8, 0.45, 0.3, 0.45, 2.5, -24.0, resynthesis=0.2, leveler=0.4),
+    Preset("Interview", "Moderate noise reduction, clearer speech, even levels between speakers.",
+           0.6, 0.55, 0.35, 0.55, 2.5, -24.0, presence=0.1, leveler=0.7),
     Preset("Podcast", "Broadcast-style voice: enhanced, gently compressed, consistent.",
-           0.6, 0.7, 0.4, 0.7, 3.0, -26.0, presence=0.15, hf_clarity=0.1, gate_db=-60.0),
-    Preset("Extreme Noise", "Maximum AI enhancement with artifact protection, for very poor recordings.",
-           1.0, 0.5, 0.5, 0.5, 2.5, -24.0, max_attenuation_db=60.0),
+           0.6, 0.7, 0.4, 0.7, 3.0, -26.0, presence=0.15, hf_clarity=0.1, gate_db=-60.0,
+           resynthesis=0.25, leveler=0.6),
+    Preset("Extreme Noise", "Maximum AI enhancement and voice re-synthesis with artifact protection.",
+           1.0, 0.5, 0.5, 0.5, 2.5, -24.0, max_attenuation_db=60.0, resynthesis=0.4, leveler=0.5),
 ]}
 DEFAULT_PRESET = "Clean Voice"
 
@@ -113,6 +139,7 @@ def apply_simple(s: ProcessingSettings, noise: float, speech: float, room: float
     else:
         s.max_attenuation_db = round(12.0 + 28.0 * s.noise_reduction, 1)
     s.lf_cleanup = round(0.2 + 0.5 * s.speech_enhancement, 2)
+    s.tonal_balance = s.speech_enhancement
     s.reverb_reduction = s.room_reduction
     s.echo_reduction = round(0.5 * s.room_reduction, 2)
     return s
@@ -123,7 +150,7 @@ def from_preset(name: str, base: ProcessingSettings | None = None) -> Processing
     s = (base or ProcessingSettings()).copy(
         preset=p.name, compressor_amount=p.compressor_amount, comp_ratio=p.comp_ratio,
         comp_threshold_db=p.comp_threshold_db, voice_presence=p.presence, hf_clarity=p.hf_clarity,
-        noise_gate_db=p.gate_db,
+        noise_gate_db=p.gate_db, resynthesis=p.resynthesis, leveler_amount=p.leveler,
     )
     return apply_simple(s, p.noise, p.speech, p.room)
 

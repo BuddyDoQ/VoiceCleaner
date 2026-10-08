@@ -346,7 +346,12 @@ class MainWindow(QMainWindow):
         il.setContentsMargins(20, 18, 20, 18)
         initial = from_preset(self.config.preset)
         initial = initial.copy(target_lufs=self.config.target_lufs, peak_ceiling_dbtp=self.config.peak_ceiling_dbtp)
+        if isinstance(self.config.extra.get("eq_gains"), list):
+            initial = initial.copy(eq_gains=[float(g) for g in self.config.extra["eq_gains"]],
+                                   eq_tilt=float(self.config.extra.get("eq_tilt", 0.0)))
         self.settings_panel = SettingsPanel(initial, self.config.auto_settings, self.config.advanced_open)
+        self.settings_panel.restore_section_states(self.config.extra.get("sections", {}))
+        self.settings_panel.downloadResynthRequested.connect(self._download_resynth_model)
         il.addWidget(self.settings_panel)
         scroll.setWidget(inner)
         v.addWidget(scroll, 1)
@@ -473,7 +478,8 @@ class MainWindow(QMainWindow):
             self.model_chip.setText(f"AI model: {st.name}")
             self.model_chip.setToolTip(f"{st.name} • license {mm.model.license}\n{mm.model.homepage}")
             self.settings_panel.set_ai_available(True)
-        else:
+        self.settings_panel.set_resynth_status(mm.resynth_available, mm.device.kind)
+        if not (st.installed and not st.error):
             self.model_chip.setText("AI model: not installed")
             self.model_chip.setStyleSheet(f"color: {theme.WARNING};")
             self.model_chip.setToolTip(st.error or f"Model files not found in {models_dir()}.\n"
@@ -621,6 +627,7 @@ class MainWindow(QMainWindow):
         self._activate("enhanced")
         self.player.seek(pos)
 
+        self.settings_panel.set_eq_result(result.auto_eq_bands)
         self.metrics.set_enhanced(result.enhanced_metrics.as_rows())
         self.metrics.set_score(result.original_metrics.clarity, result.enhanced_metrics.clarity)
         notes = list(dict.fromkeys(self.settings_panel.auto_notes + result.notes))
@@ -747,6 +754,43 @@ class MainWindow(QMainWindow):
         self.learn_btn.setText("Clear Noise Profile")
         self.profile_label.setText(f"Noise profile learned ({b - a:.1f} s). Click Enhance to apply.")
         log.info("Learned noise profile from %.2f-%.2f s", a, b)
+
+    # ============================================================================ models
+    def _download_resynth_model(self):
+        if self._task_running():
+            self.status_label.setText("Please wait for the current task to finish.")
+            return
+        r = QMessageBox.question(
+            self, "Download voice re-synthesis model",
+            "VoiceCleaner will download NVIDIA BigVGAN-v2 (about 490 MB, MIT license) from NVIDIA's official "
+            "Hugging Face repository and verify its checksum.\n\nAfter this one-time download, re-synthesis "
+            "works offline. Download now?")
+        if r != QMessageBox.Yes:
+            return
+        from ..ai.model_manager import RESYNTH_FOLDER
+
+        def work(ctx):
+            from ..ai.model_download import DownloadError, download_file_model
+            from ..utils.errors import ModelUnavailableError
+
+            try:
+                download_file_model(RESYNTH_FOLDER, models_dir(),
+                                    progress=lambda f: ctx.progress(f, f"Downloading voice model… {f:.0%}"),
+                                    cancelled=lambda: ctx.cancelled)
+            except DownloadError as exc:
+                ctx.check()  # a cancel shows as "Cancelled", not as an error
+                raise ModelUnavailableError(f"The download failed ({exc}).") from None
+            except OSError as exc:
+                raise ModelUnavailableError("The download failed. Check the internet connection and try again.") from exc
+            return True
+
+        def done(_):
+            self._busy(False, "Voice re-synthesis model installed.")
+            if self.model_manager is not None:
+                self.settings_panel.set_resynth_status(True, self.model_manager.device.kind)
+
+        self._busy(True, "Downloading voice model...")
+        self.task = run_task(work, self, on_success=done, on_error=self._task_failed, on_progress=self._on_progress)
 
     # ============================================================================ recording
     def start_new_recording(self):
@@ -980,6 +1024,9 @@ class MainWindow(QMainWindow):
         c.noise_reduction, c.speech_enhancement, c.room_reduction = s.noise_reduction, s.speech_enhancement, s.room_reduction
         c.target_lufs, c.peak_ceiling_dbtp = s.target_lufs, s.peak_ceiling_dbtp
         c.advanced_open = self.settings_panel.advanced_open
+        c.extra["sections"] = self.settings_panel.section_states()
+        c.extra["eq_gains"] = list(s.eq_gains)
+        c.extra["eq_tilt"] = s.eq_tilt
         try:
             c.save()
         except OSError as exc:

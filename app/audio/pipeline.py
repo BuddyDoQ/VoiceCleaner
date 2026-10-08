@@ -28,6 +28,7 @@ from .denoise import DenoiseParams, SpectralDenoiser, TransientSuppressor
 from .dereverb import DereverbParams, Dereverberator
 from .dsp import process_in_chunks
 from .eq import CleanupFilter, CleanupParams, VoiceEQ, VoiceEQParams, choose_highpass
+from .leveler import Leveler, LevelerParams
 from .limiter import LimiterParams, TruePeakLimiter
 from .loader import AudioData, allocate
 from .noise_profile import NoiseProfile
@@ -41,7 +42,7 @@ log = get_logger("pipeline")
 MAX_QC_ATTEMPTS = 3
 
 # share of the progress bar per step
-WEIGHTS = {"cleanup": 0.03, "denoise": 0.10, "ai": 0.45, "dereverb": 0.10, "eq": 0.04,
+WEIGHTS = {"cleanup": 0.03, "denoise": 0.10, "ai": 0.40, "dereverb": 0.08, "resynth": 0.25, "eq": 0.04,
            "dynamics": 0.08, "loudness": 0.04, "limiter": 0.06, "qc": 0.10}
 
 
@@ -61,6 +62,7 @@ class PipelineResult:
     model_name: str | None
     noise_profile: str
     eq_bands: list = field(default_factory=list)
+    auto_eq_bands: list = field(default_factory=list)
 
     @property
     def duration(self) -> float:
@@ -112,6 +114,8 @@ class EnhancementPipeline:
         sr = audio.sample_rate
         disk = audio.is_disk_backed
         steps = ["cleanup", "denoise", "ai", "dereverb", "eq", "dynamics", "loudness", "limiter", "qc"]
+        if settings.resynthesis > 0.01:
+            steps.insert(4, "resynth")
         prog = _Progress(ctx, steps)
         notes: list[str] = []
         log.info("Pipeline start: %s, %.1f s, settings=%s", audio.info.path if audio.info else "<memory>",
@@ -144,7 +148,7 @@ class EnhancementPipeline:
             else:
                 # without speech, "normalising" would only turn the background back up
                 target = (analysis.lufs if np.isfinite(analysis.lufs) else -23.0) - channel_offset
-            mastered = self._master(restored, sr, settings, prog, disk, target)
+            mastered = self._master(restored, sr, settings, prog, disk, target, analysis)
             output = self._channel_output(mastered, audio.channels)
             if not settings.quality_control:
                 break
@@ -175,7 +179,7 @@ class EnhancementPipeline:
             attempts=attempt, stages=restore_info.get("stages", []), notes=notes + restore_info.get("notes", []),
             processing_seconds=elapsed, device_label=device_label,
             model_name=restore_info.get("model"), noise_profile=restore_info.get("profile", "none"),
-            eq_bands=restore_info.get("eq_bands", []),
+            eq_bands=restore_info.get("eq_bands", []), auto_eq_bands=restore_info.get("auto_eq_bands", []),
         )
         log.info("Pipeline done in %.2f s (%.1fx realtime), attempts=%d, stages=%s, device=%s",
                  elapsed, result.realtime_factor, attempt, result.stages, device_label)
@@ -313,14 +317,37 @@ class EnhancementPipeline:
             info["stages"].append(f"de-reverb (RT60 {rt60:.2f} s)")
         prog("dereverb", 1.0, "Reducing reverb...")
 
-        # 6. voice EQ
-        prog("eq", 0.0, "Improving clarity...")
-        eq = VoiceEQ(sr, VoiceEQParams(amount=s.speech_enhancement, presence=s.voice_presence,
+        # 6. neural voice re-synthesis
+        if s.resynthesis > 0.01:
+            from ..ai.resynthesis import Resynthesis
+
+            if self.model_manager is None or not self.model_manager.resynth_available:
+                info["notes"].append("Voice re-synthesis was skipped: its model is not installed.")
+            else:
+                try:
+                    prog("resynth", 0.0, "Re-synthesizing voice...")
+                    y = Resynthesis(self.model_manager).process(
+                        cur, sr, s.resynthesis, progress=lambda f: prog("resynth", f, "Re-synthesizing voice..."),
+                        check_cancel=prog.check)
+                    for a in range(0, n, 1 << 20):
+                        spare[a : a + (1 << 20)] = y[a : a + (1 << 20)]
+                    cur, spare = spare, cur
+                    info["stages"].append(f"re-synthesis {s.resynthesis:.0%} ({self.model_manager.resynth.display_name})")
+                except ModelUnavailableError as exc:
+                    info["notes"].append(exc.user_message)
+            prog("resynth", 1.0, "Re-synthesizing voice...")
+            prog.check()
+
+        # 7. voice EQ: automatic tonal balance + graphic EQ + tilt
+        prog("eq", 0.0, "Balancing tone...")
+        eq = VoiceEQ(sr, VoiceEQParams(amount=s.tonal_balance, presence=s.voice_presence,
                                        hf_clarity=s.hf_clarity, lf_cleanup=s.lf_cleanup,
-                                       bandwidth_hz=analysis.bandwidth_hz))
+                                       bandwidth_hz=analysis.bandwidth_hz, tilt=s.eq_tilt,
+                                       manual_gains=list(s.eq_gains)))
         eq.process(cur, analysis.speech_mask, FRAME_HOP_S, out=spare)
         cur, spare = spare, cur
         info["eq_bands"] = eq.bands
+        info["auto_eq_bands"] = eq.auto_bands
         if eq.bands:
             info["stages"].append("voice EQ: " + ", ".join(f"{b.kind} {b.freq:.0f} Hz {b.gain_db:+.1f} dB"
                                                            for b in eq.bands))
@@ -372,7 +399,7 @@ class EnhancementPipeline:
 
     # --- mastering ----------------------------------------------------------------------
     def _master(self, x: np.ndarray, sr: int, s: ProcessingSettings, prog: _Progress, disk: bool,
-                target: float) -> np.ndarray:
+                target: float, analysis: AnalysisResult) -> np.ndarray:
         n, ch = x.shape
         step = 1 << 20
         prog("dynamics", 0.0, "Balancing levels...")
@@ -382,6 +409,12 @@ class EnhancementPipeline:
         for a in range(0, n, step):
             y[a : a + step] = x[a : a + step] * g
         prog.check()
+        # slow leveling first (seconds), then the compressor handles syllables (milliseconds)
+        lev = Leveler(sr, LevelerParams(amount=s.leveler_amount, range_db=s.leveler_range_db,
+                                        speed_s=s.leveler_speed_s))
+        lev.process(y, analysis.speech_mask, FRAME_HOP_S, out=y)
+        self.last_leveling = (lev.max_boost_db, lev.max_cut_db)
+        prog("dynamics", 0.35, "Leveling speech...")
         comp = Compressor(sr, CompressorParams(amount=s.compressor_amount, threshold_db=s.comp_threshold_db,
                                                ratio=s.comp_ratio, attack_ms=s.comp_attack_ms,
                                                release_ms=s.comp_release_ms))

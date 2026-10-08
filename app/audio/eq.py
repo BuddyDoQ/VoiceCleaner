@@ -124,6 +124,8 @@ class VoiceEQParams:
     hf_clarity: float = 0.0  # -1..1 user trim (+-4 dB shelf from 7.5 kHz)
     lf_cleanup: float = 0.3  # 0..1 low-end tightening
     bandwidth_hz: float = 20000.0  # where real content ends; no boosts above it
+    tilt: float = 0.0  # -1 darker .. +1 brighter (about +-4 dB at the extremes, pivot 1 kHz)
+    manual_gains: list = field(default_factory=list)  # graphic EQ, dB per EQ_BANDS entry
 
 
 @dataclass
@@ -199,6 +201,26 @@ def design_voice_eq(centers: np.ndarray, measured_db: np.ndarray, params: VoiceE
     return bands
 
 
+def manual_bands(params: VoiceEQParams) -> list[EQBand]:
+    """The user's graphic EQ and tilt as filter bands."""
+    from .settings import EQ_BANDS
+
+    bands: list[EQBand] = []
+    if abs(params.tilt) > 0.005:
+        t = 4.0 * float(np.clip(params.tilt, -1, 1))
+        bands.append(EQBand("lowshelf", 1000.0, -t / 2, 0.5))
+        bands.append(EQBand("highshelf", 1000.0, t / 2, 0.5))
+    for (freq, _label, kind), gain in zip(EQ_BANDS, params.manual_gains or []):
+        if abs(gain) > 0.05:
+            bands.append(EQBand(kind, freq, float(gain), 1.0))
+    return bands
+
+
+def response_db(bands: list[EQBand], freqs: np.ndarray, sr: int = 48000) -> np.ndarray:
+    """Magnitude response of ``bands`` as designed (what the listener hears)."""
+    return dsp.sos_response_db(bands_to_sos(bands, sr, zero_phase=False), freqs, sr)
+
+
 def bands_to_sos(bands: list[EQBand], sr: int, zero_phase: bool = True) -> np.ndarray:
     """Biquads for ``bands``; gains are halved for forward-backward filtering."""
     rows = []
@@ -209,9 +231,9 @@ def bands_to_sos(bands: list[EQBand], sr: int, zero_phase: bool = True) -> np.nd
         if b.kind == "peak":
             rows.append(dsp.peaking(b.freq, b.gain_db * k, b.q, sr))
         elif b.kind == "lowshelf":
-            rows.append(dsp.low_shelf(b.freq, b.gain_db * k, sr))
+            rows.append(dsp.low_shelf(b.freq, b.gain_db * k, sr, s=min(1.0, b.q) if b.q < 0.9 else 1.0))
         elif b.kind == "highshelf":
-            rows.append(dsp.high_shelf(b.freq, b.gain_db * k, sr))
+            rows.append(dsp.high_shelf(b.freq, b.gain_db * k, sr, s=min(1.0, b.q) if b.q < 0.9 else 1.0))
     return np.array(rows) if rows else np.zeros((0, 6))
 
 
@@ -223,5 +245,6 @@ class VoiceEQ:
 
     def process(self, x: np.ndarray, speech_mask: np.ndarray, hop_s: float, out: np.ndarray | None = None) -> np.ndarray:
         centers, measured = _speech_ltas(x, self.sr, speech_mask, hop_s)
-        self.bands = design_voice_eq(centers, measured, self.params)
+        self.auto_bands = design_voice_eq(centers, measured, self.params)
+        self.bands = self.auto_bands + manual_bands(self.params)
         return apply_sos_zero_phase(x, bands_to_sos(self.bands, self.sr), self.sr, out)

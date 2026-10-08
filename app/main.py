@@ -9,7 +9,7 @@ if __package__ in (None, ""):  # allow `python app/main.py`
     __package__ = "app"
 
 
-def selftest(src: str, dst: str) -> int:
+def selftest(src: str, dst: str, preset: str = "Clean Voice") -> int:
     """Headless end-to-end check: VoiceCleaner.exe --selftest in.wav out.wav
 
     Runs the full pipeline (with the AI model) and exports a 24-bit WAV.
@@ -32,7 +32,7 @@ def selftest(src: str, dst: str) -> int:
         audio = load_wav(src)
         analysis = analyze(audio.samples, audio.sample_rate)
         mm = ModelManager("auto")
-        result = EnhancementPipeline(mm).run(audio, analysis, auto_configure("Clean Voice", analysis).settings)
+        result = EnhancementPipeline(mm).run(audio, analysis, auto_configure(preset, analysis).settings)
         export_wav(result.samples, result.sample_rate, dst, ExportOptions("24"), source_path=Path(src))
         log.info("SELFTEST OK: %s -> %s | stages=%s | %.1fx realtime on %s | LUFS %.1f",
                  src, dst, result.stages, result.realtime_factor, result.device_label, result.enhanced_metrics.lufs)
@@ -61,8 +61,8 @@ def list_inputs() -> int:
 
 
 def main() -> int:
-    if len(sys.argv) == 4 and sys.argv[1] == "--selftest":
-        return selftest(sys.argv[2], sys.argv[3])
+    if len(sys.argv) in (4, 5) and sys.argv[1] == "--selftest":
+        return selftest(*sys.argv[2:])
     if len(sys.argv) == 2 and sys.argv[1] == "--list-inputs":
         return list_inputs()
     from PySide6.QtCore import Qt

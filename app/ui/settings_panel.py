@@ -8,9 +8,10 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxL
                                QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget)
 
 from ..audio.analyzer import AnalysisResult
-from ..audio.eq import choose_highpass
+from ..audio.eq import VoiceEQParams, choose_highpass, manual_bands
 from ..audio.settings import PRESETS, ProcessingSettings, apply_simple, auto_configure, from_preset
 from . import theme
+from .tone_widgets import CollapsibleSection, EQCurve, GraphicEQ
 
 
 class ValueSlider(QWidget):
@@ -80,6 +81,7 @@ def db_fmt(v: float) -> str:
 
 class SettingsPanel(QWidget):
     settingsChanged = Signal(object)
+    downloadResynthRequested = Signal()
 
     def __init__(self, initial: ProcessingSettings, smart: bool = True, advanced_open: bool = False, parent=None):
         super().__init__(parent)
@@ -123,6 +125,11 @@ class SettingsPanel(QWidget):
         for s in (self.noise, self.speech, self.room):
             s.valueChanged.connect(self._simple_changed)
             lay.addWidget(s)
+
+        lay.addWidget(_divider())
+        self._build_resynthesis(lay)
+        self._build_tone(lay)
+        self._build_dynamics(lay)
 
         # --- advanced ------------------------------------------------------------------
         self.adv_button = QToolButton()
@@ -197,13 +204,6 @@ class SettingsPanel(QWidget):
         self._adv(g, "reverb_reduction", "Reverb reduction", 0, 1, 0.01, pct)
         self._adv(g, "echo_reduction", "Echo reduction", 0, 1, 0.01, pct)
 
-        g = self._group(adv, "Dynamics")
-        self._adv(g, "compressor_amount", "Compressor amount", 0, 1, 0.01, pct)
-        self._adv(g, "comp_threshold_db", "Threshold", -40, -6, 0.5, lambda v: f"{v:.1f} dBFS")
-        self._adv(g, "comp_ratio", "Ratio", 1.0, 8.0, 0.1, lambda v: f"{v:.1f}:1")
-        self._adv(g, "comp_attack_ms", "Attack", 1, 100, 1, lambda v: f"{v:.0f} ms")
-        self._adv(g, "comp_release_ms", "Release", 20, 1000, 5, lambda v: f"{v:.0f} ms")
-
         g = self._group(adv, "Loudness")
         self.normalize = QCheckBox("Normalize loudness")
         self.normalize.toggled.connect(lambda v: self._advanced_changed("normalize_loudness", v))
@@ -220,6 +220,119 @@ class SettingsPanel(QWidget):
         reset = QPushButton("Reset to automatic settings")
         reset.clicked.connect(lambda: self._preset_changed(self.preset.currentText()))
         g.addWidget(reset)
+
+    # --- re-synthesis / tone / dynamics sections -------------------------------------
+    def _build_resynthesis(self, lay: QVBoxLayout):
+        sec = CollapsibleSection("Voice Re-synthesis")
+        self.resynth_section = sec
+        b = sec.body_layout
+        info = QLabel("Re-generates the cleaned voice with a neural vocoder (NVIDIA BigVGAN). Smooths away "
+                      "leftover processing artifacts and restores natural, coherent harmonics. "
+                      "Use gently: high amounts can change the voice's character.")
+        info.setWordWrap(True)
+        info.setProperty("role", "faint")
+        b.addWidget(info)
+        self._adv(b, "resynthesis", "Re-synthesis amount", 0, 1, 0.01, lambda v: "Off" if v < 0.005 else pct(v),
+                  "0% = off. 20-40% polishes the voice; 100% replaces it entirely with the re-synthesised voice.")
+        self.resynth_status = QLabel("")
+        self.resynth_status.setWordWrap(True)
+        self.resynth_status.setProperty("role", "faint")
+        b.addWidget(self.resynth_status)
+        self.resynth_download = QPushButton("Download voice model (490 MB)")
+        self.resynth_download.clicked.connect(self.downloadResynthRequested)
+        self.resynth_download.setVisible(False)
+        b.addWidget(self.resynth_download)
+        lay.addWidget(sec)
+
+    def set_resynth_status(self, installed: bool, device_kind: str = "cpu", message: str = ""):
+        w = self._advanced["resynthesis"]
+        w.setEnabled(installed)
+        self.resynth_download.setVisible(not installed)
+        if message:
+            self.resynth_status.setText(message)
+        elif not installed:
+            self.resynth_status.setText("The re-synthesis model is not installed yet. It is downloaded once from "
+                                        "NVIDIA's official repository and then works offline.")
+        elif device_kind != "cuda":
+            self.resynth_status.setText("Runs on the CPU here: about real-time speed, so long recordings take a while.")
+        else:
+            self.resynth_status.setText("")
+        self.resynth_section.summary.setText("" if installed else "not installed")
+
+    def _build_tone(self, lay: QVBoxLayout):
+        sec = CollapsibleSection("EQ && Tone")  # "&&" = literal ampersand in Qt
+        self.tone_section = sec
+        b = sec.body_layout
+        self.eq_curve = EQCurve()
+        b.addWidget(self.eq_curve)
+        legend = QLabel(f"<span style='color:{theme.ACCENT}'>\u2014</span> total &nbsp; "
+                        f"<span style='color:{theme.ORIGINAL}'>- -</span> automatic balance (after Enhance)")
+        legend.setProperty("role", "faint")
+        b.addWidget(legend)
+        self._adv(b, "tonal_balance", "Tonal balancing", 0, 1, 0.01, pct,
+                  "Automatically corrects muddiness, boominess and missing presence by comparing the voice "
+                  "with the average spectrum of natural speech.")
+        self._adv(b, "eq_tilt", "Tilt (darker \u2194 brighter)", -1, 1, 0.01, signed_pct,
+                  "Tilts the whole tone around 1 kHz: left for warmer/darker, right for brighter.")
+        self.graphic_eq = GraphicEQ()
+        self.graphic_eq.changed.connect(self._eq_changed)
+        b.addWidget(self.graphic_eq)
+        reset = QPushButton("Reset EQ")
+        reset.setProperty("role", "ghost")
+        reset.clicked.connect(self._reset_eq)
+        b.addWidget(reset, alignment=Qt.AlignRight)
+        lay.addWidget(sec)
+
+    def _build_dynamics(self, lay: QVBoxLayout):
+        sec = CollapsibleSection("Dynamics")
+        self.dynamics_section = sec
+        b = sec.body_layout
+        t = QLabel("LEVELING")
+        t.setProperty("role", "section")
+        b.addWidget(t)
+        self._adv(b, "leveler_amount", "Leveling", 0, 1, 0.01, lambda v: "Off" if v < 0.005 else pct(v),
+                  "Evens out loud and quiet sentences and speakers over several seconds, like riding a fader. "
+                  "Pauses are left alone, so background noise is not pumped up.")
+        self._adv(b, "leveler_range_db", "Maximum correction", 2, 20, 0.5, lambda v: f"\u00b1{v:.1f} dB")
+        self._adv(b, "leveler_speed_s", "Speed", 0.5, 8, 0.1, lambda v: f"{v:.1f} s",
+                  "How quickly the level follows changes. Shorter reacts faster; longer is smoother.")
+        t = QLabel("COMPRESSION")
+        t.setProperty("role", "section")
+        b.addWidget(t)
+        self._adv(b, "compressor_amount", "Compression", 0, 1, 0.01, lambda v: "Off" if v < 0.005 else pct(v),
+                  "Controls the peaks of individual words and syllables for a steadier, more present voice.")
+        self._adv(b, "comp_threshold_db", "Threshold", -40, -6, 0.5, lambda v: f"{v:.1f} dBFS")
+        self._adv(b, "comp_ratio", "Ratio", 1.0, 8.0, 0.1, lambda v: f"{v:.1f}:1")
+        self._adv(b, "comp_attack_ms", "Attack", 1, 100, 1, lambda v: f"{v:.0f} ms")
+        self._adv(b, "comp_release_ms", "Release", 20, 1000, 5, lambda v: f"{v:.0f} ms")
+        lay.addWidget(sec)
+
+    def _eq_changed(self, gains: list):
+        self.settings = self.settings.copy(eq_gains=list(gains))
+        self._update_eq_curve()
+        self.settingsChanged.emit(self.current())
+
+    def _reset_eq(self):
+        self.settings = self.settings.copy(eq_gains=[0.0] * len(self.settings.eq_gains), eq_tilt=0.0)
+        self.set_settings(self.settings)
+        self.settingsChanged.emit(self.current())
+
+    def _update_eq_curve(self, auto=None):
+        s = self.settings
+        self.eq_curve.set_bands(manual_bands(VoiceEQParams(tilt=s.eq_tilt, manual_gains=list(s.eq_gains))), auto)
+
+    def set_eq_result(self, auto_bands):
+        """Show the automatic tonal-balance curve chosen during the last Enhance."""
+        self._update_eq_curve(list(auto_bands))
+
+    def section_states(self) -> dict:
+        return {"resynth": self.resynth_section.is_open, "tone": self.tone_section.is_open,
+                "dynamics": self.dynamics_section.is_open}
+
+    def restore_section_states(self, states: dict):
+        self.resynth_section.set_open(bool(states.get("resynth", False)))
+        self.tone_section.set_open(bool(states.get("tone", True)))
+        self.dynamics_section.set_open(bool(states.get("dynamics", False)))
 
     def _toggle_advanced(self, on: bool):
         self.advanced.setVisible(on)
@@ -258,6 +371,8 @@ class SettingsPanel(QWidget):
             box.blockSignals(True)
             box.setChecked(val)
             box.blockSignals(False)
+        self.graphic_eq.set_values(list(s.eq_gains))
+        self._update_eq_curve()
 
     def current(self) -> ProcessingSettings:
         return self.settings.copy()
@@ -277,6 +392,7 @@ class SettingsPanel(QWidget):
         # loudness preferences are the user's, not the preset's
         s.target_lufs, s.peak_ceiling_dbtp = self.settings.target_lufs, self.settings.peak_ceiling_dbtp
         s.normalize_loudness, s.use_ai = self.settings.normalize_loudness, self.settings.use_ai
+        s.eq_gains, s.eq_tilt = list(self.settings.eq_gains), self.settings.eq_tilt  # the user's EQ is not a preset
         self.set_settings(s)
         self._update_preset_desc()
         self.settingsChanged.emit(self.current())
@@ -293,6 +409,8 @@ class SettingsPanel(QWidget):
     def _advanced_changed(self, key: str, value):
         self.settings = self.settings.copy(**{key: value})
         # keep the simple sliders in step with their advanced counterparts
+        if key == "eq_tilt":
+            self._update_eq_curve()
         mirror = {"noise_reduction": self.noise, "speech_enhancement": self.speech, "reverb_reduction": self.room}
         if key in mirror:
             mirror[key].set_value(float(value))

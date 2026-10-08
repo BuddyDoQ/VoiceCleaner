@@ -13,6 +13,9 @@ from ..utils.errors import ModelUnavailableError
 from ..utils.hardware import DeviceInfo, select_device
 from ..utils.logging import get_logger
 from .enhancement_model import DeepFilterNet3, EnhancementModel
+from .resynthesis import BigVGANResynthesizer
+
+RESYNTH_FOLDER = "BigVGAN-v2-44k"
 
 log = get_logger("models")
 
@@ -52,6 +55,8 @@ class ModelManager:
         self.model: EnhancementModel = cls(models_dir() / folder)
         self.model.device = self.device.torch_device
         self.error = ""
+        self.resynth = BigVGANResynthesizer(models_dir() / RESYNTH_FOLDER)
+        self.resynth_device = self.device
 
     def status(self) -> ModelStatus:
         return ModelStatus(self.model.key, self.model.display_name, self.model.is_installed(),
@@ -69,7 +74,9 @@ class ModelManager:
             new_device = select_device(preference)
             if new_device != self.device:
                 self.model.unload()
+                self.resynth.unload()
                 self.device = new_device
+                self.resynth_device = new_device
                 self.model.device = new_device.torch_device
 
     def get(self) -> EnhancementModel:
@@ -98,6 +105,32 @@ class ModelManager:
             self.model.unload()
             self.device = select_device("cpu")
             self.model.device = "cpu"
+
+    @property
+    def resynth_available(self) -> bool:
+        return self.resynth.is_installed()
+
+    def get_resynthesizer(self) -> BigVGANResynthesizer:
+        """The voice re-synthesis vocoder, loaded on first use (it is large)."""
+        with self._lock:
+            if not self.resynth.loaded:
+                try:
+                    self.resynth.load(self.resynth_device.torch_device)
+                except ModelUnavailableError:
+                    raise
+                except Exception as exc:
+                    log.exception("Re-synthesis model load failed")
+                    if self.resynth_device.kind == "cuda":
+                        self.resynth_fallback_to_cpu()
+                        self.resynth.load("cpu")
+                    else:
+                        raise ModelUnavailableError("The voice re-synthesis model could not be loaded.") from exc
+            return self.resynth
+
+    def resynth_fallback_to_cpu(self):
+        with self._lock:
+            self.resynth.unload()
+            self.resynth_device = select_device("cpu")
 
     def preload(self) -> None:
         try:

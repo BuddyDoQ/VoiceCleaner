@@ -210,7 +210,8 @@ def check(original: np.ndarray, enhanced: np.ndarray, sr: int, analysis: Analysi
 
     # 4. over-compression
     em = enhanced_metrics or measure(enhanced, sr, analysis, enh)
-    if analysis.loudness_range_lu > 4 and em.loudness_range_lu < 0.3 * analysis.loudness_range_lu:
+    # leveling narrows the range on purpose; only a nearly flat result is a problem
+    if analysis.loudness_range_lu > 4 and em.loudness_range_lu < min(0.3 * analysis.loudness_range_lu, 2.0):
         rep.issues.append(QCIssue("over_compressed",
                                   f"dynamic range reduced from {analysis.loudness_range_lu:.1f} to {em.loudness_range_lu:.1f} LU"))
 
@@ -241,16 +242,20 @@ def propose_rollback(report: QCReport, s: ProcessingSettings) -> tuple[Processin
         notes.append("reduced noise reduction to protect speech")
     if "spectral_change" in codes:
         s.speech_enhancement = round(s.speech_enhancement * 0.7, 3)
+        s.tonal_balance = round(s.tonal_balance * 0.7, 3)
+        s.resynthesis = round(s.resynthesis * 0.6, 3)
         s.voice_presence *= 0.6
         s.hf_clarity *= 0.6
         s.noise_reduction = round(s.noise_reduction * 0.9, 3)
         notes.append("softened EQ to keep the natural voice")
     if "hf_artifacts" in codes:
         s.hf_clarity = min(s.hf_clarity, 0.0) - 0.2
+        s.resynthesis = round(s.resynthesis * 0.6, 3)
         s.spectral_subtraction = max(1.0, s.spectral_subtraction * 0.85)
         notes.append("reduced high-frequency emphasis")
     if "over_compressed" in codes:
         s.compressor_amount = round(s.compressor_amount * 0.6, 3)
+        s.leveler_amount = round(s.leveler_amount * 0.6, 3)
         s.comp_ratio = max(1.5, s.comp_ratio * 0.8)
         notes.append("made compression gentler")
     return s, notes
@@ -259,9 +264,10 @@ def propose_rollback(report: QCReport, s: ProcessingSettings) -> tuple[Processin
 RESTORATION_FIELDS = (
     "noise_reduction", "speech_enhancement", "room_reduction", "use_ai", "noise_floor_offset_db",
     "spectral_subtraction", "max_attenuation_db", "voice_presence", "hf_clarity", "lf_cleanup",
-    "reverb_reduction", "echo_reduction", "hum_removal", "highpass_hz",
+    "reverb_reduction", "echo_reduction", "hum_removal", "highpass_hz", "resynthesis", "tonal_balance", "eq_tilt",
 )
 
 
 def restoration_key(s: ProcessingSettings) -> tuple:
-    return tuple(round(float(getattr(s, f)), 4) for f in RESTORATION_FIELDS)
+    return tuple(round(float(getattr(s, f)), 4) for f in RESTORATION_FIELDS) + tuple(
+        round(float(g), 3) for g in s.eq_gains)

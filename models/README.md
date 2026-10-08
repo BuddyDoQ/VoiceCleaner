@@ -11,6 +11,7 @@ python tools/download_models.py
 | Folder | Model | License | Size | Source |
 |---|---|---|---|---|
 | `DeepFilterNet3/` | DeepFilterNet3 (epoch 120) | MIT **or** Apache-2.0 (dual) | 8.7 MB | <https://github.com/Rikorose/DeepFilterNet> (`models/DeepFilterNet3.zip`, SHA-256 `49c52edc…22284d2`) |
+| `BigVGAN-v2-44k/` | NVIDIA BigVGAN-v2, 44.1 kHz, 128-band, 512x (generator only) | MIT | 489 MB | <https://huggingface.co/nvidia/bigvgan_v2_44khz_128band_512x> (`bigvgan_generator.pt` SHA-256 `d9fe7ec6…ccd357`) |
 
 If the folder is missing or damaged, VoiceCleaner still works: it falls back to its own
 spectral noise reduction and says so in the interface.
@@ -36,6 +37,33 @@ against the "underwater" sound of over-processed speech).
 It does not do heavy dereverberation, so VoiceCleaner adds its own statistical
 late-reverb suppression, plus profile-based noise reduction, click suppression, hum
 notches, adaptive EQ, dynamics and loudness processing around it.
+
+## Why BigVGAN-v2 for voice re-synthesis
+
+Re-synthesis analyses the cleaned voice into a log-mel spectrogram and regenerates it
+with a neural vocoder. The vocoder can only produce natural voice sounds, so leftover
+artifacts are not carried over.
+
+* **BigVGAN-v2 (selected):** a universal vocoder trained on speech, singing and
+  environmental audio across many recording conditions, so it generalizes to unseen
+  speakers. 44.1 kHz full band, MIT license for code and weights, from NVIDIA's
+  official repositories.
+* **Vocos:** 24 kHz only, which would discard the top octave of 48 kHz recordings.
+* **HiFi-GAN:** 22 kHz, trained mostly on single speakers.
+* **VoiceFixer:** generative "restoration" that predicts a new spectrum and can
+  alter the voice.
+
+Measured on the synthetic test set, a full re-synthesis of clean speech keeps
+intelligibility (STOI 0.989) and level (-0.4 dB). In the pipeline, 30 % strength costs
+at most about 0.004 STOI, and 100 % up to 0.03 on reverberant input. So presets use
+it sparingly (Noisy 20 %, Podcast 25 %, Extreme Noise 40 %); it is off otherwise.
+
+It runs about 22x realtime on an RTX 5070 Ti and about 1.3x realtime on a desktop CPU.
+
+Code: the generator and anti-aliased activations are vendored in
+`app/ai/vendor/bigvgan/` (MIT, license included). The Hugging Face Hub loader was
+removed. The mel analysis uses VoiceCleaner's own NumPy filterbank, verified identical
+to librosa's.
 
 ## License and redistribution notes
 

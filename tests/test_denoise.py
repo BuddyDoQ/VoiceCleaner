@@ -120,3 +120,9 @@ def test_transient_suppressor_removes_clicks_in_pauses(speech):
     # speech untouched
     speech_part = slice(int(3.0 * SR), int(3.5 * SR))
     np.testing.assert_allclose(out[speech_part, 0], x[speech_part], atol=1e-6)
+
+
+def test_stages_handle_input_shorter_than_one_frame(speech):
+    x = speech[int(3 * SR) : int(3 * SR) + 600]  # shorter than one STFT frame
+    y = Dereverberator(SR, DereverbParams(reverb_reduction=0.5)).process(x)
+    assert y.shape == x.shape and np.all(np.isfinite(y))

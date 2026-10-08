@@ -19,7 +19,9 @@ class DeviceInfo:
 
     @property
     def label(self) -> str:
-        return f"NVIDIA GPU ({self.name})" if self.kind == "cuda" else f"CPU ({self.name})"
+        if self.kind == "cuda":
+            return f"NVIDIA GPU ({self.name.removeprefix('NVIDIA ').strip()})"
+        return f"CPU ({self.name})"
 
 
 @lru_cache(maxsize=1)

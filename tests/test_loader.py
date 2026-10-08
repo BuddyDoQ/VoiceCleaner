@@ -86,3 +86,8 @@ def test_nan_samples_repaired(wav_file, speech):
 def test_format_duration():
     assert format_duration(65.25) == "1:05.2"
     assert format_duration(3725) == "1:02:05.0"
+
+
+def test_too_short_rejected_with_message(wav_file, speech):
+    with pytest.raises(EmptyAudioError, match="at least a tenth of a second"):
+        load_wav(wav_file(speech[:960]))

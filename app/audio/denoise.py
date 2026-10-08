@@ -31,6 +31,8 @@ class StftConfig:
 
 
 def stft(x: np.ndarray, sr: int, cfg: StftConfig) -> np.ndarray:
+    if x.shape[0] < 2 * cfg.nfft:  # very short input: pad; istft() crops back to length
+        x = np.pad(x, (0, 2 * cfg.nfft - x.shape[0]))
     _, _, z = signal.stft(x, fs=sr, window="hann", nperseg=cfg.nfft, noverlap=cfg.nfft - cfg.hop,
                           boundary="even", padded=True)
     return z  # (bins, frames)

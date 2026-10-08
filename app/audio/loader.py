@@ -40,6 +40,7 @@ SUBTYPE_LABELS = {
 MIN_SAMPLE_RATE = 8_000
 MAX_SAMPLE_RATE = 384_000
 MAX_DURATION_S = 6 * 3600
+MIN_DURATION_S = 0.1
 # How many float32 copies of the audio a full processing run keeps around
 # (original, enhanced, working buffers). Used for the memory estimate.
 WORKING_COPIES = 5
@@ -156,6 +157,11 @@ def probe(path: str | os.PathLike) -> AudioFileInfo:
         )
     if info.frames <= 0:
         raise EmptyAudioError(f"“{path.name}” contains no audio samples.")
+    if info.frames / info.samplerate < MIN_DURATION_S:
+        raise EmptyAudioError(
+            f"“{path.name}” is only {info.frames / info.samplerate * 1000:.0f} ms long. "
+            "Recordings need to be at least a tenth of a second."
+        )
     if info.frames / info.samplerate > MAX_DURATION_S:
         raise AudioLoadError(
             f"“{path.name}” is longer than {MAX_DURATION_S // 3600} hours. "

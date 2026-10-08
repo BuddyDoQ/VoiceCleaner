@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest>=8
+pyloudnorm>=0.1.1   # reference loudness meter for tests
+pystoi>=0.4         # intelligibility metric for tools/evaluate.py
+matplotlib>=3.8     # spectrogram plots while evaluating
+pyinstaller>=6.6

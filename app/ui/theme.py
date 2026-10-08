@@ -17,6 +17,7 @@ ORIGINAL = "#8ea2d0"  # original audio
 WARNING = "#f2b65a"
 ERROR = "#ef6b6b"
 SUCCESS = "#59d48f"
+RECORD = "#ff5a5f"  # recording in progress
 
 
 def qcolor(hex_value: str, alpha: int = 255) -> QColor:
@@ -83,6 +84,12 @@ QPushButton[role="ghost"]:hover {{ color: {TEXT}; background: {SURFACE_2}; }}
 QPushButton[role="round"] {{ border-radius: 22px; min-width: 44px; max-width: 44px; min-height: 44px; max-height: 44px; padding: 0; background: {TEXT}; color: {BG}; border: none; font-size: 14pt; }}
 QPushButton[role="round"]:hover {{ background: #ffffff; }}
 QPushButton[role="round"]:disabled {{ background: {SURFACE_3}; color: {FAINT}; }}
+QPushButton[role="record"] {{ background: transparent; border: 1px solid {BORDER}; color: {TEXT}; padding: 6px 12px; border-radius: 8px; }}
+QPushButton[role="record"]:hover {{ border-color: {RECORD}; }}
+QPushButton[role="record"]:checked {{ background: {RECORD}; border-color: {RECORD}; color: #ffffff; font-weight: 600; }}
+QPushButton[role="recbig"] {{ background: {RECORD}; color: #ffffff; border: none; border-radius: 10px; padding: 10px 18px; font-weight: 700; font-size: 10.5pt; }}
+QPushButton[role="recbig"]:hover {{ background: #ff7377; }}
+QPushButton[role="recbig"]:disabled {{ background: {SURFACE_3}; color: {FAINT}; }}
 QPushButton[role="icon"] {{ border-radius: 17px; min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px; padding: 0; font-size: 11pt; }}
 
 QPushButton[role="ab"] {{ background: {SURFACE_2}; border: 1px solid {BORDER}; padding: 9px 18px; font-weight: 600; letter-spacing: 1px; font-size: 9.5pt; color: {MUTED}; }}

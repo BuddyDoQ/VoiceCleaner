@@ -15,6 +15,7 @@ its own license; full license texts are included in the respective packages insi
 | LAME (inside libsndfile) | MP3 encoding | LGPL-2.0 |
 | PortAudio / sounddevice | audio playback | MIT |
 | psutil | memory detection | BSD-3-Clause |
+| soundcard, cffi | recording (WASAPI microphone and desktop-audio loopback capture) | BSD-3-Clause / MIT |
 | loguru, sympy, requests, appdirs, packaging | DeepFilterNet dependencies | MIT / BSD / Apache-2.0 |
 
 Qt is used under the LGPL: it is dynamically linked (separate DLLs in `_internal/`), so it

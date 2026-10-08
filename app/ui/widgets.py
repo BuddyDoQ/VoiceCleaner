@@ -18,6 +18,26 @@ def label(text: str = "", role: str | None = None, wrap: bool = False) -> QLabel
     return w
 
 
+class ElidedLabel(QLabel):
+    """Single-line label that shortens long text with an ellipsis instead of widening its parent."""
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setMinimumWidth(40)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setFont(self.font())
+        p.setPen(self.palette().color(self.foregroundRole()))
+        text = self.fontMetrics().elidedText(self.text(), Qt.ElideMiddle, self.width())
+        p.drawText(self.rect(), int(self.alignment() | Qt.AlignVCenter), text)
+
+    def sizeHint(self):
+        sh = super().sizeHint()
+        return sh.expandedTo(sh)
+
+
 def card() -> QFrame:
     f = QFrame()
     f.setProperty("role", "card")
@@ -60,6 +80,7 @@ class DropZone(QFrame):
     """Large dashed drop target shown before a file is loaded."""
 
     chooseClicked = Signal()
+    recordClicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -84,7 +105,18 @@ class DropZone(QFrame):
         btn.setProperty("role", "primary")
         btn.setCursor(Qt.PointingHandCursor)
         btn.clicked.connect(self.chooseClicked)
-        lay.addWidget(btn, alignment=Qt.AlignCenter)
+        rec = QPushButton("\u25cf  Record Audio")
+        rec.setProperty("role", "record")
+        rec.setCursor(Qt.PointingHandCursor)
+        rec.setToolTip("Record from a microphone (USB, headset, line-in) or from desktop audio")
+        rec.clicked.connect(self.recordClicked)
+        buttons = QHBoxLayout()
+        buttons.setSpacing(10)
+        buttons.addStretch(1)
+        buttons.addWidget(btn)
+        buttons.addWidget(rec)
+        buttons.addStretch(1)
+        lay.addLayout(buttons)
         hint = label("Mono or stereo • 16/24-bit or 32-bit float • 44.1, 48, 96 kHz and more • "
                      "drop several files for batch processing", "faint", wrap=True)
         hint.setAlignment(Qt.AlignCenter)

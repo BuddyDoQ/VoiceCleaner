@@ -11,6 +11,8 @@
 import importlib.util
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files
+
 block_cipher = None
 
 # DeepFilterNet loads its network module by name at runtime, and importing `df`
@@ -18,7 +20,10 @@ block_cipher = None
 _df_dir = Path(importlib.util.find_spec("df").origin).parent
 df_modules = ["df"] + [f"df.{p.stem}" for p in _df_dir.glob("*.py") if p.stem != "__init__"]
 
-hiddenimports = df_modules + ["libdf", "sounddevice", "_sounddevice_data", "soundfile", "_soundfile_data", "psutil"]
+hiddenimports = df_modules + ["libdf", "sounddevice", "_sounddevice_data", "soundfile", "_soundfile_data", "psutil",
+                              "soundcard", "soundcard.mediafoundation", "cffi"]
+# soundcard declares the WASAPI API in *.py.h files it reads at import time
+datas = collect_data_files("soundcard", includes=["*.h"])
 
 excludes = [
     "tkinter", "matplotlib", "pytest", "pyloudnorm", "pystoi", "librosa", "numba", "llvmlite",
@@ -33,7 +38,7 @@ a = Analysis(
     ["app/main.py"],
     pathex=["."],
     binaries=[],
-    datas=[],
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],

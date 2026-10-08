@@ -104,6 +104,14 @@ class AudioPlayer(QObject):
         return 0.0 if buf is None else buf.shape[0] / self._sr
 
     @property
+    def output_latency(self) -> float:
+        """Seconds between a sample being handed to the device and it being heard."""
+        try:
+            return float(self._stream.latency) if self._stream is not None else 0.0
+        except Exception:
+            return 0.0
+
+    @property
     def position(self) -> float:
         return self._pos / self._sr
 

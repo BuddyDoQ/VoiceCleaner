@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QFileDialo
 from ..audio import noise_profile as noise_profile_mod
 from ..audio.analyzer import analyze
 from ..audio.loader import format_duration, format_size, load_wav
+from ..audio.recorder import combine_with_original
 from ..audio.pipeline import EnhancementPipeline, PipelineResult
 from ..audio.settings import ProcessingSettings, from_preset
 from ..export.mp3_exporter import export_mp3
@@ -32,9 +34,10 @@ from . import theme
 from .audio_player import AudioPlayer
 from .batch_panel import BatchPanel
 from .export_dialog import ExportDialog
+from .record_panel import RecordPanel
 from .settings_panel import SettingsPanel
 from .waveform import WaveformOverview, WaveformView
-from .widgets import DropZone, MetricsPanel, card, label, make_app_icon, render_icon_pixmap
+from .widgets import DropZone, ElidedLabel, MetricsPanel, card, label, make_app_icon, render_icon_pixmap
 
 log = get_logger("ui")
 
@@ -55,6 +58,7 @@ class MainWindow(QMainWindow):
         self._mm_ready = threading.Event()
         self._batch = None
         self._result_settings: dict | None = None
+        self._pending_warnings: list[str] = []
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(make_app_icon())
@@ -151,12 +155,20 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.drop_zone = DropZone()
         self.drop_zone.chooseClicked.connect(self.choose_file)
+        self.drop_zone.recordClicked.connect(self.start_new_recording)
         dz_wrap = QWidget()
         dzl = QVBoxLayout(dz_wrap)
         dzl.setContentsMargins(24, 20, 24, 24)
         dzl.addWidget(self.drop_zone)
         self.stack.addWidget(dz_wrap)
-        self.stack.addWidget(self._build_editor())
+        # scrollable, so sections keep their minimum height on small screens
+        # (e.g. when the recording strip is open) instead of being squashed
+        editor_scroll = QScrollArea()
+        editor_scroll.setWidgetResizable(True)
+        editor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        editor_scroll.setFrameShape(QFrame.NoFrame)
+        editor_scroll.setWidget(self._build_editor())
+        self.stack.addWidget(editor_scroll)
         lay.addWidget(self.stack, 1)
         lay.addWidget(self._build_sidebar())
         return page
@@ -169,13 +181,12 @@ class MainWindow(QMainWindow):
 
         top = QHBoxLayout()
         top.setSpacing(10)
-        self.file_name = label("", "title")
-        self.file_name.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        top.addWidget(self.file_name)
+        self.file_name = ElidedLabel("")
+        self.file_name.setProperty("role", "title")
+        top.addWidget(self.file_name, 1)
         self.meta_chips = QHBoxLayout()
         self.meta_chips.setSpacing(6)
         top.addLayout(self.meta_chips)
-        top.addStretch(1)
         another = QPushButton("Open Another…")
         another.setProperty("role", "ghost")
         another.clicked.connect(self.choose_file)
@@ -217,6 +228,14 @@ class MainWindow(QMainWindow):
         t.setStyleSheet(f"color: {color};")
         head.addWidget(t)
         head.addStretch(1)
+        if source == "original":
+            self.record_toggle = QPushButton("\u25cf  Record")
+            self.record_toggle.setProperty("role", "record")
+            self.record_toggle.setCheckable(True)
+            self.record_toggle.setCursor(Qt.PointingHandCursor)
+            self.record_toggle.setToolTip("Record from a microphone or desktop audio into the Original track (R)")
+            self.record_toggle.toggled.connect(self._show_record_panel)
+            head.addWidget(self.record_toggle)
         play = QPushButton("▶  Play")
         play.setProperty("role", "ghost")
         play.setToolTip(f"Play the {source} audio")
@@ -235,6 +254,16 @@ class MainWindow(QMainWindow):
         vol.valueChanged.connect(lambda val, s=source: self.player.set_volume(s, val / 100))
         head.addWidget(vol)
         v.addLayout(head)
+        if source == "original":
+            self.record_panel = RecordPanel()
+            self.record_panel.setVisible(False)
+            self.record_panel.closeRequested.connect(lambda: self.record_toggle.setChecked(False))
+            self.record_panel.captureStarted.connect(self._capture_started)
+            self.record_panel.liveUpdate.connect(self._live_recording)
+            self.record_panel.recordingChanged.connect(self._recording_changed)
+            self.record_panel.finished.connect(self._recording_finished)
+            self.record_panel.failed.connect(self._error)
+            v.addWidget(self.record_panel)
         wave = WaveformView(color, placeholder)
         v.addWidget(wave, 1)
         return wave, c, vol, play
@@ -368,6 +397,7 @@ class MainWindow(QMainWindow):
         sc(Qt.Key_Home, lambda: self._seek(0.0))
         sc("Ctrl+Return", self.enhance)
         sc(Qt.Key_Escape, self._escape)
+        sc(Qt.Key_R, self._record_shortcut)
 
     # ============================================================================ state
     def _set_empty_state(self):
@@ -508,7 +538,8 @@ class MainWindow(QMainWindow):
         for text in (format_duration(info.duration), f"{info.sample_rate / 1000:g} kHz", info.channel_label,
                      info.subtype_label, format_size(info.file_size)):
             self.meta_chips.addWidget(label(text, "chip"))
-        warnings = analysis.warnings()
+        warnings = self._pending_warnings + analysis.warnings()
+        self._pending_warnings = []
         if audio.repaired_nonfinite:
             warnings.append("Some invalid samples (NaN/Inf) were replaced with silence.")
         if audio.is_disk_backed:
@@ -534,6 +565,7 @@ class MainWindow(QMainWindow):
         self.metrics.set_score(None, None)
         self.metrics.set_notes(self.settings_panel.auto_notes)
         self.stack.setCurrentIndex(1)
+        self.record_panel.set_original(True, audio.duration)
         self._busy(False, "Ready. Adjust settings if you like, then click Enhance.")
         self.speed_label.setText(f"{format_duration(info.duration)} of audio • analyzed automatically")
         log.info("Loaded %s", info.path)
@@ -716,6 +748,106 @@ class MainWindow(QMainWindow):
         self.profile_label.setText(f"Noise profile learned ({b - a:.1f} s). Click Enhance to apply.")
         log.info("Learned noise profile from %.2f-%.2f s", a, b)
 
+    # ============================================================================ recording
+    def start_new_recording(self):
+        """From the start screen: open an empty Original track with the recorder ready."""
+        if self._task_running():
+            return
+        if self.audio is None:
+            self.file_name.setText("New recording")
+            self.file_name.setToolTip("")
+            while self.meta_chips.count():
+                item = self.meta_chips.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            self.warning_label.setVisible(False)
+            self.wave_orig.placeholder = "Your recording will appear here"
+            self.wave_orig.set_overview(None)
+            self.wave_enh.set_overview(None)
+            self.metrics.set_enhanced(None)
+            self.metrics.set_score(None, None)
+            self.record_panel.set_original(False, 0.0)
+            self.stack.setCurrentIndex(1)
+            self.status_label.setText("Choose an input and press Record.")
+        self.record_toggle.setChecked(True)
+
+    def _show_record_panel(self, on: bool):
+        if not on and self.record_panel.recording:
+            self.record_toggle.setChecked(True)  # cannot hide while recording
+            return
+        if on:
+            self.record_panel.playhead = self.player.position
+            self.record_panel.refresh_sources()
+        self.record_panel.setVisible(on)
+        if not on and self.audio is None:
+            self._set_empty_state()
+
+    def _record_shortcut(self):
+        if self.tabs.currentIndex() != 0:
+            return
+        if self.stack.currentIndex() == 0:
+            self.start_new_recording()
+        elif not self.record_panel.isVisible():
+            self.record_toggle.setChecked(True)
+        else:
+            self.record_panel.playhead = self.player.position
+            self.record_panel.toggle()
+
+    def _recording_changed(self, recording: bool):
+        self.enhance_btn.setEnabled(not recording and self.audio is not None)
+        self.export_btn.setEnabled(not recording and self.result is not None)
+        self.export_action.setEnabled(not recording and self.result is not None)
+        self.learn_btn.setEnabled(not recording and self.audio is not None)
+        self.drop_zone.setEnabled(not recording)
+        self.tabs.tabBar().setEnabled(not recording)
+        self.setAcceptDrops(not recording)
+        if recording:
+            self.record_panel.playhead = self.player.position
+            if self.player.state == "playing":
+                self.player.pause()
+            self.status_label.setText("Recording\u2026")
+        else:
+            self.wave_orig.set_live(None)
+
+    def _capture_started(self):
+        rp = self.record_panel
+        if rp._mode == "overdub" and rp.monitor.isChecked() and self.audio is not None:
+            self._activate("original")
+            self.player.seek(rp._position)
+            self.player.play()
+            rp.note_playback_started(time.perf_counter(), self.player.output_latency)
+
+    def _live_recording(self, overview, offset: float):
+        self.wave_orig.set_live(overview, offset)
+        if overview is not None and self.wave_orig.overview is not None:
+            self.wave_enh.set_view(self.wave_orig.t0, self.wave_orig.t1)
+
+    def _recording_finished(self, result, mode: str, position: float, latency: float):
+        self.player.stop()
+        self.record_toggle.setChecked(False)
+        self._pending_warnings = list(result.warnings)
+        log.info("Take finished: %s mode=%s pos=%.2f latency=%.3f", result.path, mode, position, latency)
+        if mode == "new" or self.audio is None:
+            self.open_file(result.path)
+            return
+        original = self.audio
+        self._busy(True, "Combining recording with the Original...")
+
+        def work(ctx):
+            return combine_with_original(original, result.path, mode, position, latency)
+
+        combined: list[Path] = []
+
+        def open_when_finished():
+            # open only after the combine thread has fully finished, otherwise
+            # open_file() would see a task still running and refuse
+            if combined:
+                self._busy(False)
+                self.open_file(combined[0])
+
+        self.task = run_task(work, self, on_success=combined.append, on_error=self._task_failed,
+                             on_finished=open_when_finished)
+
     # ============================================================================ export
     def export(self):
         if self.result is None or self._task_running():
@@ -838,6 +970,7 @@ class MainWindow(QMainWindow):
         if self._batch:
             self._batch[1].cancel()
             self._batch[0].wait(3000)
+        self.record_panel.shutdown()
         self.player.shutdown()
         s = self.settings_panel.current()
         c = self.config

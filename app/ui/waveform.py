@@ -74,11 +74,12 @@ class WaveformView(QWidget):
         self.highlight_regions: list[tuple[float, float]] = []
         self.active = False
         self.busy_text = ""
+        self.live: tuple[WaveformOverview, float] | None = None  # recording in progress, offset (s)
         self.t0, self.t1 = 0.0, 1.0
         self._drag_start: float | None = None
         self._drag_px = 0
         self._hover_x: float | None = None
-        self.setMinimumHeight(120)
+        self.setMinimumHeight(110)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
         self.setCursor(Qt.IBeamCursor)
@@ -103,6 +104,25 @@ class WaveformView(QWidget):
         self.active = active
         self.update()
 
+    def set_live(self, overview: WaveformOverview | None, offset_s: float = 0.0):
+        """Show a recording in progress as a red layer starting at ``offset_s``."""
+        self.live = None if overview is None else (overview, offset_s)
+        if self.live is not None:
+            end = offset_s + overview.duration
+            if self.overview is None:
+                self.t0, self.t1 = 0.0, max(10.0, end * 1.15)
+            elif end > self.t1:
+                span = self.t1 - self.t0
+                self.t0, self.t1 = max(0.0, end - span * 0.85), max(0.0, end - span * 0.85) + span
+        self.update()
+
+    @property
+    def total_duration(self) -> float:
+        d = self.overview.duration if self.overview else 0.0
+        if self.live:
+            d = max(d, self.live[1] + self.live[0].duration, self.t1)
+        return d
+
     def set_busy(self, text: str):
         self.busy_text = text
         self.update()
@@ -110,7 +130,7 @@ class WaveformView(QWidget):
     def set_view(self, t0: float, t1: float):
         if self.overview is None:
             return
-        dur = self.overview.duration
+        dur = max(self.overview.duration, self.total_duration if self.live else 0.0)
         span = float(np.clip(t1 - t0, min(0.05, dur), dur))
         t0 = float(np.clip(t0, 0, dur - span))
         if (t0, t0 + span) != (self.t0, self.t1):
@@ -124,7 +144,7 @@ class WaveformView(QWidget):
     def _x_to_t(self, x: float) -> float:
         r = self._plot_rect()
         frac = (x - r.left()) / max(1.0, r.width())
-        return float(np.clip(self.t0 + frac * (self.t1 - self.t0), 0, self.overview.duration if self.overview else 0))
+        return float(np.clip(self.t0 + frac * (self.t1 - self.t0), 0, self.total_duration))
 
     def _t_to_x(self, t: float) -> float:
         r = self._plot_rect()
@@ -137,6 +157,12 @@ class WaveformView(QWidget):
         r = self._plot_rect()
         mid = r.center().y()
 
+        if self.overview is None and self.live is not None:
+            p.setPen(QPen(theme.qcolor(theme.BORDER), 1, Qt.DashLine))
+            p.drawLine(QPointF(r.left(), mid), QPointF(r.right(), mid))
+            self._draw_live(p, r)
+            self._draw_ruler(p, r)
+            return
         if self.overview is None:
             p.setPen(QPen(theme.qcolor(theme.BORDER), 1, Qt.DashLine))
             p.drawLine(QPointF(r.left(), mid), QPointF(r.right(), mid))
@@ -200,6 +226,9 @@ class WaveformView(QWidget):
         p.setBrush(core)
         p.drawPath(rpath)
 
+        if self.live is not None:
+            self._draw_live(p, r)
+
         # time ruler
         self._draw_ruler(p, r)
 
@@ -219,6 +248,31 @@ class WaveformView(QWidget):
             p.fillRect(self.rect(), theme.qcolor(theme.SURFACE, 190))
             p.setPen(theme.qcolor(theme.TEXT))
             p.drawText(self.rect(), Qt.AlignCenter, self.busy_text)
+
+    def _draw_live(self, p: QPainter, r: QRectF):
+        ov, offset = self.live
+        a, b = max(self.t0, offset), min(self.t1, offset + ov.duration)
+        if b <= a:
+            return
+        x0, x1 = self._t_to_x(a), self._t_to_x(b)
+        width = max(1, int(x1 - x0))
+        lo, hi, _ = ov.columns(a - offset, b - offset, width)
+        mid = r.center().y()
+        half = r.height() / 2 * 0.95
+        xs = x0 + np.arange(width) + 0.5
+        path = QPainterPath()
+        path.moveTo(xs[0], mid - hi[0] * half)
+        for x, v in zip(xs[1:], hi[1:]):
+            path.lineTo(x, mid - v * half)
+        for x, v in zip(xs[::-1], lo[::-1]):
+            path.lineTo(x, mid - v * half)
+        path.closeSubpath()
+        p.setPen(Qt.NoPen)
+        p.setBrush(theme.qcolor(theme.RECORD, 200))
+        p.drawPath(path)
+        # recording head
+        p.setPen(QPen(theme.qcolor(theme.RECORD), 2))
+        p.drawLine(QPointF(x1, r.top() - 4), QPointF(x1, r.bottom() + 2))
 
     def _draw_ruler(self, p: QPainter, r: QRectF):
         span = self.t1 - self.t0

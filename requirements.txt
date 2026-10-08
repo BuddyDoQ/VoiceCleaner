@@ -14,3 +14,4 @@ soundfile>=0.12
 sounddevice>=0.4.6
 PySide6>=6.6
 psutil>=5.9
+soundcard>=0.4.3   # WASAPI capture incl. desktop-audio loopback (BSD-3)

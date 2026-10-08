@@ -43,9 +43,28 @@ def selftest(src: str, dst: str) -> int:
         return 1
 
 
+def list_inputs() -> int:
+    """VoiceCleaner.exe --list-inputs: print the recordable devices (diagnostics)."""
+    from app.audio.recorder import list_sources
+    from app.utils.logging import get_logger, setup_logging
+
+    setup_logging()
+    log = get_logger("inputs")
+    try:
+        mics, desktop = list_sources()
+    except Exception:
+        log.exception("Listing inputs failed")
+        return 1
+    for s in mics + desktop:
+        log.info("INPUT %s: %s (%d ch)%s", s.kind, s.name, s.channels, " [default]" if s.is_default else "")
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) == 4 and sys.argv[1] == "--selftest":
         return selftest(sys.argv[2], sys.argv[3])
+    if len(sys.argv) == 2 and sys.argv[1] == "--list-inputs":
+        return list_inputs()
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication, QMessageBox
 

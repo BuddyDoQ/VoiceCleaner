@@ -28,6 +28,7 @@ from ..utils.logging import get_logger
 log = get_logger("analyzer")
 
 FRAME_HOP_S = 0.01
+DIGITAL_SILENCE_DB = -100.0
 
 
 @dataclass
@@ -283,8 +284,13 @@ def voice_activity(level_db: np.ndarray, flatness: np.ndarray) -> tuple[np.ndarr
     """
     if level_db.size == 0:
         return np.zeros(0, bool), np.zeros(0, bool)
-    floor = float(np.percentile(level_db, 10))
-    top = float(np.percentile(level_db, 97))
+    # Digital silence (exact zeros, e.g. desktop-audio loopback while nothing
+    # plays, or padding) says nothing about the background noise: leave it out
+    # of the statistics so it cannot drag the noise floor down to -120 dB.
+    live = level_db > DIGITAL_SILENCE_DB
+    stats = level_db[live] if live.sum() >= 50 else level_db
+    floor = float(np.percentile(stats, 10))
+    top = float(np.percentile(stats, 97))
     span = max(top - floor, 1e-3)
     speech_thr = floor + max(6.0, 0.30 * span)
     noise_thr = floor + max(3.0, min(0.15 * span, 8.0))
@@ -299,6 +305,8 @@ def voice_activity(level_db: np.ndarray, flatness: np.ndarray) -> tuple[np.ndarr
 
     noise = (level_db < noise_thr) & ~speech_wide
     noise = ndimage.binary_opening(noise, structure=np.ones(10))  # only runs >= 100 ms
+    if (noise & live).sum() >= 20:
+        noise &= live  # measure the real background, not the gaps of digital silence
     if noise.sum() < 20:  # nearly continuous speech: fall back to the quietest 5 % of frames
         quiet = level_db <= np.percentile(level_db, 5)
         noise = quiet & ~ndimage.binary_dilation(speech, structure=np.ones(5))
@@ -361,27 +369,41 @@ def detect_hum(mono: np.ndarray, sr: int) -> HumInfo:
     target_sr = 4000
     x = np.asarray(mono[: sr * 600], dtype=np.float32)  # the first 10 minutes are plenty
     x = signal.resample_poly(x, target_sr, sr) if sr != target_sr else x
-    if x.shape[0] < target_sr * 2:
+    if x.shape[0] < target_sr * 3:  # too short for a trustworthy line spectrum
         return HumInfo()
-    nper = min(x.shape[0], target_sr * 4)
+    # average at least ~6 overlapping segments: a single-segment periodogram has
+    # random +-10 dB peaks that look like hum lines (1 Hz resolution is enough)
+    nper = int(min(target_sr * 4, max(target_sr, x.shape[0] // 4)))
     f, p = signal.welch(x, fs=target_sr, nperseg=nper, noverlap=nper // 2)
     pdb = db(p)
     best = HumInfo()
+    def prominence(fk: float) -> float | None:
+        near = (f > fk - 1.5) & (f < fk + 1.5)
+        ring = ((f > fk - 25) & (f < fk - 6)) | ((f > fk + 6) & (f < fk + 25))
+        if not near.any() or not ring.any():
+            return None
+        return float(pdb[near].max() - np.median(pdb[ring]))
+
     for base in (50.0, 60.0):
-        found, proms = [], []
+        found, proms, controls = [], [], []
         for k in range(1, 11):
             fk = base * k
             if fk > target_sr / 2 - 50:
                 break
-            near = (f > fk - 1.5) & (f < fk + 1.5)
-            ring = ((f > fk - 25) & (f < fk - 6)) | ((f > fk + 6) & (f < fk + 25))
-            if not near.any() or not ring.any():
+            prom = prominence(fk)
+            if prom is None:
                 continue
-            peak_i = np.flatnonzero(near)[np.argmax(pdb[near])]
-            prom = pdb[peak_i] - np.median(pdb[ring])
+            # control point halfway between harmonics: a spectrum that is peaky
+            # everywhere (comb filtering, tonal music) is not mains hum
+            ctrl = prominence(fk + base / 2)
+            if ctrl is not None:
+                controls.append(ctrl)
             if prom > 10:
-                found.append(float(f[peak_i]))
+                near = (f > fk - 1.5) & (f < fk + 1.5)
+                found.append(float(f[np.flatnonzero(near)[np.argmax(pdb[near])]]))
                 proms.append(prom)
+        if controls and proms and np.median(controls) > np.median(proms) - 6:
+            continue
         strong = [p for p in proms if p > 15]
         if (len(found) >= 2 or strong) and (sum(proms) > best.prominence_db):
             fund = float(np.median([fr / round(fr / base) for fr in found]))

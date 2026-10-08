@@ -59,7 +59,23 @@ The guiding rule is *better speech, not obviously processed speech*.
   click-free at the same position. *Equal-loudness comparison* plays the original at
   the enhanced loudness so you judge quality, not volume.
 * **Shortcuts:** `Space` play/pause, `A`/`B` switch, `Home` to start, `Ctrl+O` open,
-  `Ctrl+Enter` enhance, `Ctrl+E` export, `Esc` cancel. `Ctrl+wheel` zooms the waveform.
+  `Ctrl+Enter` enhance, `Ctrl+E` export, `R` record/stop, `Esc` cancel. `Ctrl+wheel` zooms the waveform.
+* **Record:** click **● Record** on the Original track (or *Record Audio* on the start
+  screen, or press `R`). Pick a microphone (USB, headset, line-in) and/or **desktop
+  audio**: anything playing through a chosen speaker or headphone output, captured via
+  WASAPI loopback, so no "Stereo Mix" is needed. Recording both at once captures both
+  sides of a call; the two are aligned and clock-drift corrected. Per-source level
+  meters and trims are shown, and the take is drawn live on the Original waveform.
+  With a file already open, choose how the take relates to it:
+  * *New recording*: the take becomes the Original.
+  * *Append*: added to the end.
+  * *Overdub*: layered onto the Original from the playhead, optionally while the
+    Original plays (use headphones). Playback and capture latency are compensated.
+
+  Takes are saved to `Documents\VoiceCleaner Recordings` as 48 kHz 24-bit WAV and
+  streamed to disk while recording, so an unplugged USB microphone or a crash keeps
+  what was captured. Combined results are written as new files; the original is never
+  changed.
 * **Batch:** drop several files (or a folder). Each file is analyzed and enhanced on its
   own; a damaged file is reported and the rest continue.
 * **Export:** WAV 16-bit (dithered), 24-bit (default) or 32-bit float, original or
@@ -87,6 +103,7 @@ app/
   ui/                     PySide6 interface (main window, waveform, player, settings, batch, export)
   audio/
     loader.py             validation, float32 conversion, disk-backed buffers for long files
+    recorder.py           microphone + desktop-audio (loopback) capture, alignment, append/overdub
     analyzer.py           level/LUFS/peak/LRA, VAD, noise floor, SNR, hum, RT60, echo, pitch, clipping, stereo
     noise_profile.py      noise spectrum from pauses or a user selection
     denoise.py            Wiener denoiser, click suppressor

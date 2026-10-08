@@ -17,6 +17,7 @@ from ..audio.settings import ProcessingSettings, auto_configure
 from ..export.mp3_exporter import export_mp3
 from ..export.wav_exporter import ExportOptions, export_wav, suggest_output_path
 from ..utils.errors import CancelledError, VoiceCleanerError, friendly_message
+from ..utils.hardware import ensure_torch_imported
 from ..utils.logging import get_logger
 from .processing_worker import TaskContext
 
@@ -91,6 +92,7 @@ class BatchRunner(QObject):
 
     @Slot()
     def run(self):
+        ensure_torch_imported()
         mm = self.get_model_manager()
         for i, path in enumerate(self.files):
             if self._cancel.is_set():

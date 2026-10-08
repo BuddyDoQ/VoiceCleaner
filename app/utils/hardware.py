@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import threading
 from functools import lru_cache
 
 import psutil
@@ -70,3 +71,21 @@ def select_device(preference: str = "auto") -> DeviceInfo:
 
 def available_ram_bytes() -> int:
     return psutil.virtual_memory().available
+
+
+_torch_lock = threading.Lock()
+
+
+def ensure_torch_imported() -> None:
+    """Import PyTorch exactly once, under a lock, before concurrent work starts.
+
+    SciPy's array-API helpers check ``sys.modules['torch']``; if another thread is
+    halfway through importing torch at that moment, SciPy sees a partially
+    initialised module and fails. Every worker calls this first, so a second
+    thread simply waits until the import has finished.
+    """
+    with _torch_lock:
+        try:
+            import torch  # noqa: F401
+        except Exception as exc:  # torch missing/broken: DSP-only mode still works
+            log.warning("PyTorch unavailable: %s", exc)

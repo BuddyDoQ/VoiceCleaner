@@ -143,8 +143,12 @@ Results with *Clean Voice* + smart settings (STOI = short-time objective intelli
 | speech + HVAC + hum + clicks + reverb | 0.615 → 0.658 | -40 → -53 dBFS |
 
 Noise floors are measured after loudness normalization, so they are relative to
-speech at -16 LUFS. Processing speed was 10-28x realtime on an RTX 5070 Ti, and about
-the same on a Ryzen 7 9800X3D CPU, because the model is very small.
+speech at -16 LUFS. Processing speed, for the whole pipeline including quality checks,
+was 10-28x realtime on an RTX 5070 Ti and 9-23x realtime on a Ryzen 7 9800X3D CPU
+alone. The model is small, so a GPU helps less than you might expect.
+
+To check a packaged build (or a user's machine) without the GUI:
+`VoiceCleaner.exe --selftest input.wav output.wav` (the result goes to the log).
 
 The **speech clarity score** in the interface is an internal estimate. It combines
 the speech-to-background ratio with the depth of syllable modulation, and is not a

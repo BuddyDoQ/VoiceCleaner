@@ -9,7 +9,43 @@ if __package__ in (None, ""):  # allow `python app/main.py`
     __package__ = "app"
 
 
+def selftest(src: str, dst: str) -> int:
+    """Headless end-to-end check: VoiceCleaner.exe --selftest in.wav out.wav
+
+    Runs the full pipeline (with the AI model) and exports a 24-bit WAV.
+    Useful for verifying a packaged build or diagnosing a user's machine.
+    """
+    from app.ai.model_manager import ModelManager
+    from app.audio.analyzer import analyze
+    from app.audio.loader import load_wav
+    from app.audio.pipeline import EnhancementPipeline
+    from app.audio.settings import auto_configure
+    from app.export.wav_exporter import ExportOptions, export_wav
+    from app.utils.errors import friendly_message
+    from app.utils.hardware import ensure_torch_imported
+    from app.utils.logging import get_logger, setup_logging
+
+    setup_logging()
+    log = get_logger("selftest")
+    try:
+        ensure_torch_imported()
+        audio = load_wav(src)
+        analysis = analyze(audio.samples, audio.sample_rate)
+        mm = ModelManager("auto")
+        result = EnhancementPipeline(mm).run(audio, analysis, auto_configure("Clean Voice", analysis).settings)
+        export_wav(result.samples, result.sample_rate, dst, ExportOptions("24"), source_path=Path(src))
+        log.info("SELFTEST OK: %s -> %s | stages=%s | %.1fx realtime on %s | LUFS %.1f",
+                 src, dst, result.stages, result.realtime_factor, result.device_label, result.enhanced_metrics.lufs)
+        return 0
+    except Exception as exc:
+        log.exception("SELFTEST FAILED")
+        print(friendly_message(exc)[1], file=sys.stderr) if sys.stderr else None
+        return 1
+
+
 def main() -> int:
+    if len(sys.argv) == 4 and sys.argv[1] == "--selftest":
+        return selftest(sys.argv[2], sys.argv[3])
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication, QMessageBox
 

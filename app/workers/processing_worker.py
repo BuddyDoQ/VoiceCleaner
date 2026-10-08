@@ -17,6 +17,7 @@ from typing import Any, Callable
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from ..utils.errors import CancelledError, friendly_message
+from ..utils.hardware import ensure_torch_imported
 from ..utils.logging import get_logger
 
 log = get_logger("worker")
@@ -61,6 +62,7 @@ class _Worker(QObject):
     @Slot()
     def run(self):
         try:
+            ensure_torch_imported()
             result = self.fn(self.ctx)
         except CancelledError:
             self.failed.emit("Cancelled", "Processing was cancelled.", True)

@@ -8,14 +8,17 @@
 # Models are NOT bundled inside the executable; they live in dist/VoiceCleaner/models
 # so they can be updated or replaced independently of the application.
 
-from PyInstaller.utils.hooks import collect_submodules
+import importlib.util
+from pathlib import Path
 
 block_cipher = None
 
-hiddenimports = (
-    collect_submodules("df")  # DeepFilterNet loads its network module by name at runtime
-    + ["libdf", "sounddevice", "_sounddevice_data", "soundfile", "_soundfile_data", "psutil"]
-)
+# DeepFilterNet loads its network module by name at runtime, and importing `df`
+# for discovery fails outside the app's torchaudio shim, so list modules from disk.
+_df_dir = Path(importlib.util.find_spec("df").origin).parent
+df_modules = ["df"] + [f"df.{p.stem}" for p in _df_dir.glob("*.py") if p.stem != "__init__"]
+
+hiddenimports = df_modules + ["libdf", "sounddevice", "_sounddevice_data", "soundfile", "_soundfile_data", "psutil"]
 
 excludes = [
     "tkinter", "matplotlib", "pytest", "pyloudnorm", "pystoi", "librosa", "numba", "llvmlite",

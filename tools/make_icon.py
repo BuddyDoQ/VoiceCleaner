@@ -1,5 +1,9 @@
-"""Render the application icon to assets/voicecleaner.ico (used by the Windows build)."""
+"""Render the application icon to assets/voicecleaner.ico (Windows build) and, on macOS,
+assets/voicecleaner.icns (Mac build)."""
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +22,20 @@ def main():
     render_icon_pixmap(256).save(str(out / "voicecleaner.ico"), "ICO")
     render_icon_pixmap(256).save(str(out / "voicecleaner.png"), "PNG")
     print("wrote", out / "voicecleaner.ico")
+    if sys.platform == "darwin":
+        write_icns(out / "voicecleaner.icns")
+
+
+def write_icns(path: Path):
+    """iconutil builds an .icns from an .iconset folder of fixed-name PNGs."""
+    iconset = Path(tempfile.mkdtemp()) / "voicecleaner.iconset"
+    iconset.mkdir()
+    for size in (16, 32, 128, 256, 512):
+        render_icon_pixmap(size).save(str(iconset / f"icon_{size}x{size}.png"), "PNG")
+        render_icon_pixmap(size * 2).save(str(iconset / f"icon_{size}x{size}@2x.png"), "PNG")
+    subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(path)], check=True)
+    shutil.rmtree(iconset.parent)
+    print("wrote", path)
 
 
 if __name__ == "__main__":

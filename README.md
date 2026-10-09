@@ -28,6 +28,31 @@ py -3.11 -m venv .venv
 Run the tests with `.venv\Scripts\python -m pytest`. To build the standalone app, run
 `.venv\Scripts\python tools\build_windows.py`; the result is `dist\VoiceCleaner\VoiceCleaner.exe`.
 
+### macOS
+
+Requires macOS 12+ on Apple Silicon (an Intel Mac works too if you build there) and
+**Python 3.11** (for example `uv python install 3.11`).
+
+```bash
+python3.11 -m venv .venv
+.venv/bin/python -m pip install torch torchaudio
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python tools/download_models.py
+.venv/bin/python -m app.main
+```
+
+To build the app and its disk image, run `.venv/bin/python tools/build_mac.py`. The result
+is `dist/mac/VoiceCleaner.app` plus `release/<version>/VoiceCleaner-<version>-macos-arm64.dmg`
+and `.zip`. Add `--sign "Developer ID Application: …" --notarize <profile>` for a
+build that opens without a Gatekeeper warning, and `--publish` to upload it to the GitHub
+release. On macOS:
+
+* processing runs on the CPU (about 30x realtime on Apple Silicon);
+* desktop-audio (loopback) recording is unavailable because macOS has no system loopback
+  device; microphone recording works, and macOS asks for permission the first time;
+* preferences and downloaded models live in `~/Library/Application Support/VoiceCleaner`,
+  and logs in `~/Library/Logs/VoiceCleaner`.
+
 ## Releasing
 
 Releases ship in two editions built from the same code:

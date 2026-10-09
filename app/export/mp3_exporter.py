@@ -51,7 +51,7 @@ def export_mp3(samples: np.ndarray, sr: int, path: str | os.PathLike, quality: s
         os.replace(tmp, path)
     except PermissionError as exc:
         _cleanup(tmp)
-        raise ExportError(f"Windows did not allow writing to “{path.parent}”.") from exc
+        raise ExportError(f"The system did not allow writing to “{path.parent}”.") from exc
     except Exception as exc:
         _cleanup(tmp)
         log.exception("MP3 export failed")

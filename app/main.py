@@ -65,7 +65,7 @@ def main() -> int:
         return selftest(*sys.argv[2:])
     if len(sys.argv) == 2 and sys.argv[1] == "--list-inputs":
         return list_inputs()
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QEvent, QObject, Qt
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     from app.ui import theme
@@ -107,6 +107,21 @@ def main() -> int:
     except AttributeError:
         pass
     window.show()
+
+    class _FinderOpen(QObject):
+        """macOS delivers files opened from Finder (double-click, drop on the Dock icon)
+        as QFileOpenEvent, not as command-line arguments."""
+
+        def eventFilter(self, obj, event):
+            if event.type() == QEvent.Type.FileOpen:
+                p = Path(event.file())
+                if p.suffix.lower() in (".wav", ".wave") and p.exists():
+                    window.open_file(p)
+                return True
+            return False
+
+    finder_open = _FinderOpen(app)
+    app.installEventFilter(finder_open)
     for arg in sys.argv[1:]:
         p = Path(arg)
         if p.suffix.lower() in (".wav", ".wave") and p.exists():

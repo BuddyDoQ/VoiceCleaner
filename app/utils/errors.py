@@ -63,7 +63,7 @@ def friendly_message(exc: BaseException) -> tuple[str, str]:
         )
     if isinstance(exc, PermissionError):
         return "Permission denied", (
-            "Windows did not allow access to the file. It may be open in another "
+            "The system did not allow access to the file. It may be open in another "
             "program, or the folder may be read-only."
         )
     if isinstance(exc, OSError):

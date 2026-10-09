@@ -16,6 +16,10 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
+# macOS gives secondary threads a 512 KB stack, too small for PyTorch/DeepFilterNet
+# (the process dies with SIGBUS). 16 MB matches what CPython uses for its own threads.
+WORKER_STACK_SIZE = 16 * 1024 * 1024
+
 from ..utils.errors import CancelledError, friendly_message
 from ..utils.hardware import ensure_torch_imported
 from ..utils.logging import get_logger
@@ -87,6 +91,7 @@ class TaskHandle(QObject):
     def __init__(self, fn: Callable[[TaskContext], Any], parent: QObject | None = None):
         super().__init__(parent)
         self._thread = QThread()
+        self._thread.setStackSize(WORKER_STACK_SIZE)
         self._worker = _Worker(fn)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)

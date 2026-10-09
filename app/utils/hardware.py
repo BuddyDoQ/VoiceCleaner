@@ -37,6 +37,13 @@ def cpu_name() -> str:
         name = winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
     except Exception:
         pass
+    try:  # macOS, e.g. "Apple M3 Pro"
+        import subprocess
+
+        out = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True, timeout=5)
+        name = out.stdout.strip() or name
+    except Exception:
+        pass
     return name
 
 

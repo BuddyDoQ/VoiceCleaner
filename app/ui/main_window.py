@@ -6,7 +6,6 @@ All heavy work runs on background threads; the window only reacts to results.
 from __future__ import annotations
 
 import os
-import subprocess
 import threading
 import time
 from pathlib import Path
@@ -28,6 +27,7 @@ from ..export.mp3_exporter import export_mp3
 from ..export.wav_exporter import ExportOptions, export_wav
 from ..utils.config import APP_NAME, APP_VERSION, UserConfig, edition, log_dir, models_dir, user_models_dir
 from ..utils.logging import get_logger
+from ..utils.shell import reveal
 from ..workers.batch_worker import BatchOptions, start_batch
 from ..workers.processing_worker import TaskHandle, run_task
 from . import theme
@@ -179,7 +179,7 @@ class MainWindow(QMainWindow):
         appearance = m.addMenu("Appearance")
         agroup = QActionGroup(self)
         self.theme_actions = {}
-        for key, text in (("auto", "Automatic (follow Windows)"), ("day", "Day"), ("night", "Night")):
+        for key, text in (("auto", "Automatic (follow system)"), ("day", "Day"), ("night", "Night")):
             a = QAction(text, self, checkable=True)
             a.setChecked(self.theme_pref == key)
             a.triggered.connect(lambda _=False, k=key: self.set_theme(k))
@@ -996,7 +996,7 @@ class MainWindow(QMainWindow):
         box.addButton(QMessageBox.Ok)
         box.exec()
         if box.clickedButton() is show:
-            subprocess.Popen(["explorer", "/select,", str(path)])
+            reveal(path)
 
     # ============================================================================ batch
     def _start_batch(self, files: list, output_dir):

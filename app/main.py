@@ -60,12 +60,31 @@ def list_inputs() -> int:
     return 0
 
 
+def check_updates_cli() -> int:
+    """VoiceCleaner --check-updates: query GitHub once and print the result (diagnostics)."""
+    from app.utils import updates
+    from app.utils.config import APP_VERSION
+
+    try:
+        release = updates.fetch_latest()
+    except updates.UpdateError as exc:
+        print(f"Update check failed: {exc} ({exc.__cause__})")
+        return 1
+    asset = updates.pick_asset(release)
+    state = "newer version available" if updates.is_newer(release.version) else "up to date"
+    print(f"Running {APP_VERSION}; latest release {release.version} ({release.published}): {state}")
+    print(f"Download for this computer: {asset.url if asset else release.page_url}")
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) in (4, 5) and sys.argv[1] == "--selftest":
         return selftest(*sys.argv[2:])
     if len(sys.argv) == 2 and sys.argv[1] == "--list-inputs":
         return list_inputs()
-    from PySide6.QtCore import Qt
+    if len(sys.argv) == 2 and sys.argv[1] == "--check-updates":
+        return check_updates_cli()
+    from PySide6.QtCore import QEvent, QObject, Qt
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     from app.ui import theme
@@ -107,6 +126,21 @@ def main() -> int:
     except AttributeError:
         pass
     window.show()
+
+    class _FinderOpen(QObject):
+        """macOS delivers files opened from Finder (double-click, drop on the Dock icon)
+        as QFileOpenEvent, not as command-line arguments."""
+
+        def eventFilter(self, obj, event):
+            if event.type() == QEvent.Type.FileOpen:
+                p = Path(event.file())
+                if p.suffix.lower() in (".wav", ".wave") and p.exists():
+                    window.open_file(p)
+                return True
+            return False
+
+    finder_open = _FinderOpen(app)
+    app.installEventFilter(finder_open)
     for arg in sys.argv[1:]:
         p = Path(arg)
         if p.suffix.lower() in (".wav", ".wave") and p.exists():

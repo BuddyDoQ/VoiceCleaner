@@ -19,7 +19,7 @@ from ..export.wav_exporter import ExportOptions, export_wav, suggest_output_path
 from ..utils.errors import CancelledError, VoiceCleanerError, friendly_message
 from ..utils.hardware import ensure_torch_imported
 from ..utils.logging import get_logger
-from .processing_worker import TaskContext
+from .processing_worker import WORKER_STACK_SIZE, TaskContext
 
 log = get_logger("batch")
 
@@ -127,6 +127,7 @@ class BatchRunner(QObject):
 
 def start_batch(files: list[Path], options: BatchOptions, model_manager_getter) -> tuple[QThread, BatchRunner]:
     thread = QThread()
+    thread.setStackSize(WORKER_STACK_SIZE)
     runner = BatchRunner(files, options, model_manager_getter)
     runner.moveToThread(thread)
     thread.started.connect(runner.run)

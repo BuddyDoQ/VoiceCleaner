@@ -107,7 +107,7 @@ def export_wav(samples: np.ndarray, sr: int, path: str | os.PathLike, options: E
         raise
     except PermissionError as exc:
         _cleanup(tmp)
-        raise ExportError(f"Windows did not allow writing to “{path.parent}”. Choose another folder, "
+        raise ExportError(f"The system did not allow writing to “{path.parent}”. Choose another folder, "
                           "or close the file if it is open in another program.") from exc
     except OSError as exc:
         _cleanup(tmp)

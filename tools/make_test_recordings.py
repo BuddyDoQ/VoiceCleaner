@@ -1,7 +1,7 @@
 """Generate synthetic test recordings for evaluating the enhancement pipeline.
 
-Clean speech comes from the Windows speech synthesizer (System.Speech), so it
-is real, intelligible speech rather than tones. Degraded versions are made by
+Clean speech comes from the Windows speech synthesizer (System.Speech), or from
+``say`` on macOS, so it is real, intelligible speech rather than tones. Degraded versions are made by
 adding controlled noise / hum / reverb at known signal-to-noise ratios. The
 clean signal is kept in ``test_audio/reference`` so objective metrics can be
 computed against it (see ``tools/evaluate.py``).
@@ -39,9 +39,18 @@ TEXT_MALE = (
 )
 
 
+MAC_VOICES = {"Microsoft Zira Desktop": "Samantha", "Microsoft David Desktop": "Fred"}
+
+
 def tts(text: str, voice: str, rate: int = 0) -> np.ndarray:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "tts.wav"
+        if sys.platform == "darwin":
+            subprocess.run(["say", "-v", MAC_VOICES.get(voice, voice), "--file-format=WAVE",
+                            f"--data-format=LEI16@{SR}", "-o", str(out), text], check=True, capture_output=True)
+            x, sr = sf.read(out, dtype="float32")
+            assert sr == SR
+            return x
         script = (
             "Add-Type -AssemblyName System.Speech;"
             "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"

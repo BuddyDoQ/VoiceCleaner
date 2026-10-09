@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxL
                                QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget)
 
 from ..audio.loader import format_duration
-from ..audio.recorder import MODES, InputSource, RecordingError, RecordingSession, list_sources
+from ..audio.recorder import MIC_PRIVACY_HINT, MODES, InputSource, RecordingError, RecordingSession, list_sources
 from ..utils.logging import get_logger
 from ..workers.processing_worker import run_task
 from . import theme
@@ -411,5 +411,5 @@ class RecordPanel(QFrame):
             silent = s.silent_sources()
             if silent:
                 msgs.append(f"No sound from “{silent[0].name}” yet. Check that it is not muted, "
-                            "or that Windows allows apps to use the microphone.")
+                            f"or that VoiceCleaner may use the microphone ({MIC_PRIVACY_HINT}).")
         self.status.setText(" ".join(msgs))

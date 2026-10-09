@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import sys
 import threading
 import time
 import warnings
@@ -41,6 +42,10 @@ RECORD_SR = 48_000
 BLOCK_FRAMES = 480  # 10 ms
 OVERVIEW_BLOCK = 64  # must match ui.waveform.OVERVIEW_BLOCK
 SILENCE_WARN_S = 3.0
+
+
+MIC_PRIVACY_HINT = ("System Settings → Privacy & Security → Microphone" if sys.platform == "darwin"
+                    else "Settings → Privacy → Microphone")
 
 
 class RecordingError(VoiceCleanerError):
@@ -298,7 +303,7 @@ class RecordingSession:
         silent = [st.source.name for st in usable if st.max_peak < 1e-6]
         for name in silent:
             warn.append(f"“{name}” delivered only silence. If it is a microphone, check that it is "
-                        "not muted and that Windows allows apps to use it (Settings → Privacy → Microphone).")
+                        f"not muted and that VoiceCleaner may use it ({MIC_PRIVACY_HINT}).")
 
         tracks = []
         for st in usable:

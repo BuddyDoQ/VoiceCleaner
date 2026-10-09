@@ -8,7 +8,6 @@ background; only files that can actually be played are listed.
 from __future__ import annotations
 
 import os
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +19,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QFileDialog, QHB
 from ..audio.loader import format_duration, format_size, load_wav, probe
 from ..utils.errors import VoiceCleanerError
 from ..utils.logging import get_logger
+from ..utils.shell import FILE_MANAGER, open_folder, reveal
 from ..workers.processing_worker import run_task
 from .audio_player import AudioPlayer
 from .waveform import WaveformOverview, WaveformView
@@ -138,7 +138,7 @@ class PlaybackPanel(QWidget):
         loc.addWidget(self.location, 1)
         self.open_dir_btn = QPushButton("Open Recording Folder")
         self.open_dir_btn.setProperty("role", "outline")
-        self.open_dir_btn.setToolTip("Show this location in File Explorer")
+        self.open_dir_btn.setToolTip(f"Show this location in {FILE_MANAGER}")
         self.open_dir_btn.clicked.connect(self._open_location)
         loc.addWidget(self.open_dir_btn)
         outer.addLayout(loc)
@@ -216,7 +216,7 @@ class PlaybackPanel(QWidget):
         self.batch_btn.clicked.connect(self._add_selected_to_batch)
         self.show_btn = QPushButton("Show in Folder")
         self.show_btn.setProperty("role", "outline")
-        self.show_btn.clicked.connect(lambda: self.current and subprocess.Popen(["explorer", "/select,", str(self.current)]))
+        self.show_btn.clicked.connect(lambda: self.current and reveal(self.current))
         for b in (self.show_btn, self.batch_btn, self.enhance_btn):
             b.setEnabled(False)
             row.addWidget(b)
@@ -264,7 +264,7 @@ class PlaybackPanel(QWidget):
             self._scan_task.cancel()
         self.location.setText(str(root))
         self.location.setToolTip(str(root))
-        self.open_dir_btn.setText("Open Session Folder" if self.mode == "session" else "Open in Explorer")
+        self.open_dir_btn.setText("Open Session Folder" if self.mode == "session" else f"Open in {FILE_MANAGER}")
         self.status.setText("Scanning…")
 
         def work(ctx):
@@ -331,7 +331,7 @@ class PlaybackPanel(QWidget):
     def _open_location(self):
         root = self.location_path()
         if root and root.exists():
-            os.startfile(str(root))  # noqa: S606 - opens File Explorer
+            open_folder(root)
 
     # --- playback -----------------------------------------------------------------------
     def _selected_paths(self) -> list[Path]:

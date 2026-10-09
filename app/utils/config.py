@@ -24,8 +24,18 @@ def app_root() -> Path:
     that models can be updated independently of the application.
     """
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        exe_dir = Path(sys.executable).resolve().parent
+        if sys.platform == "darwin" and exe_dir.name == "MacOS":  # VoiceCleaner.app/Contents/MacOS
+            return exe_dir.parent / "Resources"
+        return exe_dir
     return Path(__file__).resolve().parents[2]
+
+
+def _local_data_base() -> Path:
+    """Per-user, machine-local data (logs, downloaded models)."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support"
+    return Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache")
 
 
 def models_dir() -> Path:
@@ -40,8 +50,7 @@ def user_models_dir() -> Path:
     if override:
         path = Path(override)
     else:
-        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / ".cache")
-        path = Path(base) / APP_NAME / "models"
+        path = _local_data_base() / APP_NAME / "models"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -64,15 +73,19 @@ def edition() -> str:
 
 
 def user_data_dir() -> Path:
-    base = os.environ.get("APPDATA") or str(Path.home() / ".config")
-    path = Path(base) / APP_NAME
+    if sys.platform == "darwin":
+        path = Path.home() / "Library" / "Application Support" / APP_NAME
+    else:
+        path = Path(os.environ.get("APPDATA") or Path.home() / ".config") / APP_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def log_dir() -> Path:
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / ".cache")
-    path = Path(base) / APP_NAME / "logs"
+    if sys.platform == "darwin":
+        path = Path.home() / "Library" / "Logs" / APP_NAME
+    else:
+        path = _local_data_base() / APP_NAME / "logs"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 SR = 48_000
+os.environ.setdefault("VOICECLEANER_NO_UPDATE_CHECK", "1")  # tests never contact GitHub
 
 
 def speech_like(seconds: float = 6.0, sr: int = SR, f0: float = 140.0, seed: int = 0) -> np.ndarray:

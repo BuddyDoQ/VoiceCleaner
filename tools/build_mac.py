@@ -1,6 +1,7 @@
 """Build VoiceCleaner.app for macOS and package it as a DMG for a GitHub release.
 
 Usage:  python tools/build_mac.py [--skip-tests] [--sign IDENTITY] [--notarize PROFILE] [--publish]
+        python tools/build_mac.py --no-package      # just dist/mac/VoiceCleaner.app, for testing
 
 Result (release/<version>/, uploaded as-is to the GitHub release v<version>):
     VoiceCleaner-<v>-macos-<arch>.dmg     drag-to-Applications disk image
@@ -152,6 +153,7 @@ def main():
     ap.add_argument("--sign", metavar="IDENTITY", help='e.g. "Developer ID Application: Name (TEAMID)"')
     ap.add_argument("--notarize", metavar="PROFILE", help="notarytool keychain profile (needs --sign)")
     ap.add_argument("--publish", action="store_true", help="upload to the GitHub release v<version>")
+    ap.add_argument("--no-package", action="store_true", help="build and sign the .app only (no DMG/zip/release files)")
     a = ap.parse_args()
     if sys.platform != "darwin":
         sys.exit("build_mac.py runs on macOS only.")
@@ -160,6 +162,9 @@ def main():
 
     app = APP if a.skip_build else build(a.python, a.skip_tests)
     sign(app, a.sign)
+    if a.no_package:
+        print(f"\nBuilt {app}")
+        return
     if a.notarize:  # notarize the app itself so the zip is stapled too
         tmpzip = OUT / "notarize.zip"
         OUT.mkdir(parents=True, exist_ok=True)

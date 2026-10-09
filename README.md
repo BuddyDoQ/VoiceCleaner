@@ -312,6 +312,21 @@ standardized intelligibility measure.
   names, settings, devices, timings and errors, never audio content. It is also
   reachable from the app menu (*Open Log Folder*).
 
+## Updates
+
+*Check for Updates…* in the app menu asks GitHub for the latest published release. If
+there is a newer version, the app shows what is new and offers the download that fits
+this computer (macOS DMG, Windows installer, or the GPU web installer); it opens in the
+browser and installs like any other version. Nothing is downloaded or installed
+automatically, and nothing about you, your computer or your audio is sent.
+
+By default the app also checks automatically once a day, a few seconds after starting,
+and only speaks up when there is something new. Turn this off with the checkbox in the
+update window. *Skip Version* hides that version from automatic checks. To check from a
+terminal (useful for diagnosing network problems): `VoiceCleaner --check-updates`. Set
+`VOICECLEANER_NO_UPDATE_CHECK=1` to disable automatic checks entirely, for example on
+managed computers.
+
 ## Known limitations
 
 * De-reverberation is statistical (spectral). It clearly reduces room tails but cannot

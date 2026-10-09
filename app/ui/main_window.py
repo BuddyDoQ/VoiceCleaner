@@ -25,6 +25,7 @@ from ..audio.pipeline import EnhancementPipeline, PipelineResult
 from ..audio.settings import ProcessingSettings, from_preset
 from ..export.mp3_exporter import export_mp3
 from ..export.wav_exporter import ExportOptions, export_wav
+from ..utils import updates
 from ..utils.config import APP_NAME, APP_VERSION, UserConfig, edition, log_dir, models_dir, user_models_dir
 from ..utils.logging import get_logger
 from ..utils.shell import reveal
@@ -41,6 +42,7 @@ from .. import sessions
 from .brand import STUDIO_NAME, AboutDialog, OpenSessionDialog, SessionNameDialog, app_icon, logo_pixmap
 from .compile_panel import CompilePanel
 from .playback_panel import PlaybackPanel
+from .update_dialog import UpdateChecker, UpdateDialog
 from .widgets import DropZone, ElidedLabel, MetricsPanel, card, label
 
 log = get_logger("ui")
@@ -119,6 +121,12 @@ class MainWindow(QMainWindow):
         self.playback.set_session(self.session, sessions.sessions_root())
         self.compile_panel.set_session(self.session)
         QTimer.singleShot(50, self._init_engine)
+
+        self.update_checker = UpdateChecker(self)
+        self.update_checker.found.connect(self._update_found)
+        self.update_checker.upToDate.connect(self._update_up_to_date)
+        self.update_checker.failed.connect(self._update_failed)
+        QTimer.singleShot(4000, self._auto_check_updates)  # after startup has settled
 
     # ================================================================================== UI
     def _build_header(self) -> QWidget:
@@ -200,6 +208,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction("Open Log Folder", lambda: self._open_folder(log_dir()))
         m.addAction("Models and Licenses", self._show_models)
+        self.update_action = m.addAction("Check for Updates\u2026", lambda: self.check_for_updates(manual=True))
         m.addAction(f"About {APP_NAME}", self._show_about)
         return m
 
@@ -1132,6 +1141,62 @@ class MainWindow(QMainWindow):
                  "Voice re-synthesis: NVIDIA BigVGAN-v2 (MIT)",
                  "Fonts: Bebas Neue, Syne, DM Mono (SIL Open Font License)"]
         AboutDialog(lines, self).exec()
+
+    # ============================================================================= updates
+    def _auto_updates_enabled(self) -> bool:
+        return bool(self.config.extra.get("update_auto", True)) and not os.environ.get("VOICECLEANER_NO_UPDATE_CHECK")
+
+    def _auto_check_updates(self):
+        last = float(self.config.extra.get("update_last_check", 0) or 0)
+        if self._auto_updates_enabled() and updates.due_for_auto_check(last):
+            self.check_for_updates(manual=False)
+
+    def check_for_updates(self, manual: bool = True):
+        if self.update_checker.check(manual):
+            self.update_action.setEnabled(False)
+            self.update_action.setText("Checking for Updates\u2026")
+
+    def _update_check_done(self):
+        self.update_action.setEnabled(True)
+        self.update_action.setText("Check for Updates\u2026")
+
+    def _update_checked(self):
+        self._update_check_done()
+        self.config.extra["update_last_check"] = time.time()
+        try:
+            self.config.save()
+        except OSError:
+            pass
+
+    def _update_found(self, release, manual: bool):
+        self._update_checked()
+        if not manual and self.config.extra.get("update_skip") == release.version:
+            return
+        dlg = UpdateDialog(release, bool(self.config.extra.get("update_auto", True)), self)
+
+        def closed(code: int):
+            self.config.extra["update_auto"] = dlg.auto_box.isChecked()
+            if code == UpdateDialog.SKIP:
+                self.config.extra["update_skip"] = release.version
+            try:
+                self.config.save()
+            except OSError:
+                pass
+
+        dlg.finished.connect(closed)
+        dlg.open()  # window-modal but non-blocking: an automatic check never stalls the app
+
+    def _update_up_to_date(self, release, manual: bool):
+        self._update_checked()
+        if manual:
+            QMessageBox.information(self, "Check for Updates",
+                                    f"<b>You have the latest version.</b><br>{APP_NAME} {APP_VERSION} is up to date "
+                                    f"(latest release: {release.version}).")
+
+    def _update_failed(self, message: str, manual: bool):
+        self._update_check_done()
+        if manual:
+            self._error("Update check failed", message)
 
     # ============================================================================ sessions
     def _update_title(self):

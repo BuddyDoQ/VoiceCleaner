@@ -21,6 +21,7 @@ import tempfile as _tempfile  # noqa: E402
 
 _os.environ["APPDATA"] = _tempfile.mkdtemp(prefix="vc_appdata_")
 _os.environ["USERPROFILE"] = _tempfile.mkdtemp(prefix="vc_profile_")
+_os.environ["VOICECLEANER_NO_UPDATE_CHECK"] = "1"  # never contact GitHub from a smoke test
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 

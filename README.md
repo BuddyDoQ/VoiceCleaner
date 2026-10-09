@@ -32,7 +32,7 @@ Run the tests with `.venv\Scripts\python -m pytest`. To build the standalone app
 
 ```powershell
 dotnet tool restore                      # WiX Toolset 5 (pinned in .config/dotnet-tools.json)
-.venv\Scripts\python toolselease.py   # tests, clean build, ZIP, MSI, checksums
+.venv\Scripts\python tools\release.py   # tests, clean build, ZIP, MSI, checksums
 ```
 
 The release is written to `release\<version>\`:

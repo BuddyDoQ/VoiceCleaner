@@ -18,7 +18,7 @@ _os.environ["USERPROFILE"] = _tempfile.mkdtemp(prefix="vc_profile_")
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
 from PySide6.QtCore import QTimer  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from app.ui import theme  # noqa: E402
 from app.ui.export_dialog import ExportDialog  # noqa: E402
@@ -45,9 +45,12 @@ def auto_accept(app, out_png=None):
                 if out_png:
                     top.grab().save(str(out_png))
                 top._accept()
+                break  # keep ticking: the "Export complete" box follows
+            # match by type (macOS ignores QMessageBox titles); done(): close() is ignored
+            # because the box has no Cancel/escape button
+            if top.isVisible() and isinstance(top, QMessageBox):
+                top.done(0)
                 return
-            if top.isVisible() and top.windowTitle() == "Export complete":
-                top.close()
         QTimer.singleShot(100, tick)
     QTimer.singleShot(200, tick)
 

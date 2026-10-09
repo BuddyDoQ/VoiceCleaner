@@ -18,7 +18,7 @@ _os.environ["USERPROFILE"] = _tempfile.mkdtemp(prefix="vc_profile_")
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
 from PySide6.QtCore import QModelIndex, QTimer  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from app.ui import theme  # noqa: E402
 from app.ui.export_dialog import ExportDialog  # noqa: E402
@@ -90,8 +90,15 @@ def main():
         QTimer.singleShot(100, accept_dialog)
 
     QTimer.singleShot(300, accept_dialog)
-    QTimer.singleShot(4000, lambda: [t.close() for t in app.topLevelWidgets() if t.isVisible() and t is not w
-                                     and t.windowTitle() == "Export complete"])
+    def close_done_box():  # retry: the export can finish after any fixed delay
+        # match by type: macOS ignores QMessageBox window titles
+        boxes = [t for t in app.topLevelWidgets() if t.isVisible() and isinstance(t, QMessageBox)]
+        for t in boxes:
+            t.done(0)  # close() is ignored: the box has no Cancel/escape button
+        if not boxes:
+            QTimer.singleShot(200, close_done_box)
+
+    QTimer.singleShot(500, close_done_box)
     cp.export()
     pump(app, lambda: any(p.name.endswith("Compilation.wav") for p in ex.iterdir()) and not w._task_running(), 60)
     f = next(p for p in ex.iterdir() if p.name.endswith("Compilation.wav"))

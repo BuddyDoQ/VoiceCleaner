@@ -1,0 +1,29 @@
+# Changelog
+
+## 1.0.1
+
+- **Compile tab:** join enhanced takes into one WAV.
+  - It starts with the session's enhanced exports. Add more by drag and drop from
+    Explorer, with *Add Files*, or with *Add to Compilation* in the Playback tab.
+  - Drag-and-drop re-ordering (plus ▲/▼, `Ctrl+Up`/`Ctrl+Down`, `Delete`). Double-click a
+    take to hear it.
+  - Leading and trailing silence of every take is trimmed, keeping up to 100 ms at each
+    end (adjustable).
+  - Optional gap between takes and loudness matching. Preview, then export.
+- **Shorten long pauses (optional, off by default):** pauses inside a recording longer
+  than 1.0 s (adjustable, 0.3–5 s) are shortened to 250 ms (adjustable; "Remove
+  completely" is an explicit choice).
+  - Available in the Compile tab, and on export in the Enhance tab (Dynamics → Pauses,
+    Batch too).
+  - Your choices are remembered between sessions.
+- Silence detection now follows each recording's own background level, so raw recordings
+  with audible room noise are trimmed correctly.
+- Number fields use the DM Mono typeface for legible digits.
+
+## 1.0.0
+
+First public release: speech enhancement (DeepFilterNet3 + DSP), neural voice
+re-synthesis (BigVGAN-v2, downloaded on demand), EQ and tonal balancing, dynamic
+leveling, recording (microphone and desktop audio), sessions, playback, batch processing,
+Steamburger Studios branding with day/night themes. Standard (CPU) and NVIDIA GPU
+editions.

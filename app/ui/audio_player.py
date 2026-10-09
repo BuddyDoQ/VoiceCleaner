@@ -7,6 +7,7 @@ point in the recording.
 """
 from __future__ import annotations
 
+import sys
 import threading
 
 import numpy as np
@@ -18,6 +19,11 @@ log = get_logger("player")
 
 SOURCES = ("original", "enhanced")
 SWITCH_FADE_S = 0.012
+# CoreAudio honours latency="low" with callbacks of a few frames (15 frames = 0.7 ms at
+# 22.05 kHz), far too short for a Python callback: any GIL pause becomes a dropout.
+# ~20 ms blocks keep playback clean; the A/B switch still lands within one block.
+MAC_BLOCK_S = 0.02
+MAC_LATENCY_S = 0.05  # output buffer: headroom for UI redraws and background processing
 
 
 class AudioPlayer(QObject):
@@ -183,9 +189,13 @@ class AudioPlayer(QObject):
             return
         import sounddevice as sd
 
+        if sys.platform == "darwin":
+            blocksize, latency = int(self._sr * MAC_BLOCK_S), MAC_LATENCY_S
+        else:
+            blocksize, latency = 0, "low"
         self._stream = sd.OutputStream(
             samplerate=self._sr, channels=2, dtype="float32", callback=self._callback,
-            blocksize=0, latency="low",
+            blocksize=blocksize, latency=latency,
         )
 
     def _close_stream(self):

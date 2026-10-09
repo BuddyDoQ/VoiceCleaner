@@ -451,6 +451,24 @@ class CompilePanel(QWidget):
             it.setSelected(True)
         self._changed()
 
+    def options(self) -> dict:
+        """Current choices, saved in the preferences between sessions."""
+        return {"handle_ms": self.handle.value(), "gap_ms": self.gap.value(), "level": self.level.isChecked(),
+                "pause_on": self.pause_box.isChecked(), "pause_min_s": self.pause_min.value(),
+                "pause_keep_ms": self.pause_keep.value()}
+
+    def restore_options(self, o: dict):
+        try:
+            self.handle.setValue(int(o.get("handle_ms", self.handle.value())))
+            self.gap.setValue(int(o.get("gap_ms", self.gap.value())))
+            self.level.setChecked(bool(o.get("level", self.level.isChecked())))
+            self.pause_min.setValue(float(o.get("pause_min_s", self.pause_min.value())))
+            self.pause_keep.setValue(int(o.get("pause_keep_ms", self.pause_keep.value())))
+            self.pause_box.setChecked(bool(o.get("pause_on", False)))
+        except (TypeError, ValueError):
+            pass  # damaged preferences: keep the defaults
+        self._sync_pause_controls()
+
     def pause_settings(self) -> PauseSettings:
         return PauseSettings(enabled=self.pause_box.isChecked(), min_pause_s=self.pause_min.value(),
                              keep_ms=float(self.pause_keep.value()))

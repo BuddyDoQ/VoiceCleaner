@@ -51,7 +51,7 @@ class ValueSlider(QWidget):
         self._update_label()
 
     def value(self) -> float:
-        return self.lo + self.slider.value() * self.step
+        return round(self.lo + self.slider.value() * self.step, 6)  # no float noise like 1.5000000000000002
 
     def set_value(self, v: float, emit: bool = False):
         self.slider.blockSignals(not emit)

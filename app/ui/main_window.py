@@ -95,6 +95,8 @@ class MainWindow(QMainWindow):
         self.playback.playStarted.connect(self._pause_main_player)
         self.tabs.addTab(self.playback, "PLAYBACK")
         self.compile_panel = CompilePanel()
+        if isinstance(self.config.extra.get("compile"), dict):
+            self.compile_panel.restore_options(self.config.extra["compile"])
         self.compile_panel.exportRequested.connect(self._export_compilation)
         self.compile_panel.playStarted.connect(self._compile_play_started)
         self.playback.addToCompile.connect(self._add_to_compile)
@@ -405,6 +407,14 @@ class MainWindow(QMainWindow):
         if isinstance(self.config.extra.get("eq_gains"), list):
             initial = initial.copy(eq_gains=[float(g) for g in self.config.extra["eq_gains"]],
                                    eq_tilt=float(self.config.extra.get("eq_tilt", 0.0)))
+        pauses = self.config.extra.get("pauses")
+        if isinstance(pauses, dict):
+            try:
+                initial = initial.copy(pause_shorten=bool(pauses.get("shorten", False)),
+                                       pause_min_s=float(pauses.get("min_s", initial.pause_min_s)),
+                                       pause_keep_ms=float(pauses.get("keep_ms", initial.pause_keep_ms)))
+            except (TypeError, ValueError):
+                pass
         self.settings_panel = SettingsPanel(initial, self.config.auto_settings, self.config.advanced_open)
         self.settings_panel.restore_section_states(self.config.extra.get("sections", {}))
         self.settings_panel.downloadResynthRequested.connect(self._download_resynth_model)
@@ -1291,6 +1301,8 @@ class MainWindow(QMainWindow):
         c.target_lufs, c.peak_ceiling_dbtp = s.target_lufs, s.peak_ceiling_dbtp
         c.advanced_open = self.settings_panel.advanced_open
         c.extra["sections"] = self.settings_panel.section_states()
+        c.extra["pauses"] = {"shorten": s.pause_shorten, "min_s": s.pause_min_s, "keep_ms": s.pause_keep_ms}
+        c.extra["compile"] = self.compile_panel.options()
         c.extra["eq_gains"] = list(s.eq_gains)
         c.extra["eq_tilt"] = s.eq_tilt
         c.extra["session_path"] = str(self.session.path)

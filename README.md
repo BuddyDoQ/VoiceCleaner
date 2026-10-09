@@ -162,8 +162,8 @@ The guiding rule is *better speech, not obviously processed speech*.
   * Preview the result, then export it to the session's Exports folder as
     `<Session> - Compilation.wav`.
 * **Shorten long pauses (optional, off by default):** pauses inside a recording that are
-  longer than a threshold (0.7 s by default) are shortened to a natural pause (250 ms by
-  default). The kept pause is made of the start and end of the original silence, so
+  longer than a threshold (1.0 s by default, adjustable from 0.3 to 5 s) are shortened to a natural pause (250 ms by
+  default, adjustable up to 2 s). Both values are remembered between sessions. The kept pause is made of the start and end of the original silence, so
   breaths and lead-ins survive, joined by a short crossfade so the background tone
   continues without clicks. Setting the length to 0 ("Remove completely") removes long
   pauses entirely, an explicit choice. Silence before the first word and after the last

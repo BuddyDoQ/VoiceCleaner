@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields, replace
 
+from .pauses import DEFAULT_KEEP_MS, DEFAULT_MIN_PAUSE_S
+
 # Graphic EQ bands: (centre Hz, label, filter kind). Octave spacing over the voice range.
 EQ_BANDS: list[tuple[float, str, str]] = [
     (80.0, "Low end", "lowshelf"),
@@ -66,8 +68,8 @@ class ProcessingSettings:
     # long pauses: shortened on export only, and only when the user turns it on
     # (presets never enable it). Keep 0 ms = remove long pauses completely.
     pause_shorten: bool = False
-    pause_min_s: float = 0.7
-    pause_keep_ms: float = 250.0
+    pause_min_s: float = DEFAULT_MIN_PAUSE_S
+    pause_keep_ms: float = DEFAULT_KEEP_MS
     compressor_amount: float = 0.45
     comp_threshold_db: float = -24.0
     comp_ratio: float = 2.5

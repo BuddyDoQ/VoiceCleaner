@@ -12,7 +12,9 @@ equal-gain crossfade so the room tone continues without clicks or dropouts.
 ``keep_ms = 0`` removes such pauses completely, which is an explicit choice.
 
 Speech itself is never cut: word gaps and stop-consonant closures are a few
-hundred milliseconds at most, well below the minimum pause length.
+hundred milliseconds at most, well below the minimum pause length. The 1.0 s
+default also leaves ordinary sentence breaks (typically 0.5-0.9 s) alone; lower
+it to tighten pacing further.
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ import numpy as np
 
 FRAME_S = 0.01
 CROSSFADE_S = 0.02
-DEFAULT_MIN_PAUSE_S = 0.7
+DEFAULT_MIN_PAUSE_S = 1.0  # catches clearly-too-long pauses, not ordinary sentence breaks
 DEFAULT_KEEP_MS = 250.0
 MIN_PAUSE_RANGE = (0.3, 5.0)
 

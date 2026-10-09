@@ -87,6 +87,16 @@ def test_stereo():
     assert y.shape[1] == 2 and removed > 1.5
 
 
+def test_default_threshold_is_one_second_and_adjustable():
+    from app.audio.pauses import DEFAULT_MIN_PAUSE_S
+    from app.audio.settings import ProcessingSettings
+
+    assert DEFAULT_MIN_PAUSE_S == 1.0 and ProcessingSettings().pause_min_s == 1.0
+    x = _speech_with_pauses([0.85, 1.6])  # a sentence break and a long pause
+    assert len(find_cuts(x, SR, DEFAULT_MIN_PAUSE_S, 250)) == 1  # default: only the long pause
+    assert len(find_cuts(x, SR, 0.7, 250)) == 2  # user lowered it: both
+
+
 def test_never_enabled_by_default_or_by_presets():
     from app.audio.settings import PRESETS, ProcessingSettings, from_preset
 

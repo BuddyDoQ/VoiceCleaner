@@ -124,17 +124,20 @@ def test_fetch_latest_rejects_unexpected_json(monkeypatch):
         updates.fetch_latest()
 
 
-def test_update_dialog_offers_this_computers_download(monkeypatch):
+def test_update_dialog_offers_this_computers_download(monkeypatch, request):
     import os
+
+    import shiboken6
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication, QLabel
 
     from app.ui.update_dialog import UpdateDialog
 
-    app = QApplication.instance() or QApplication([])  # noqa: F841
+    QApplication.instance() or QApplication([])
     monkeypatch.setattr(updates, "edition", lambda: "standard")
     dlg = UpdateDialog(release(names=ALL_ASSETS, body="### What's new\n\n- Something."), auto_check=False)
+    request.addfinalizer(lambda: shiboken6.delete(dlg))  # parentless: destroy before Qt shuts down
     texts = " ".join(w.text() for w in dlg.findChildren(QLabel))
     assert "VoiceCleaner 1.2.0 is available" in texts
     assert dlg.auto_box.isChecked() is False

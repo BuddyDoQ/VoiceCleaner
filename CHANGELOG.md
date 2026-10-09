@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.2
+
+- **macOS:** VoiceCleaner now runs natively on Apple Silicon Macs (DMG and zip).
+  - Finder integration: *Show in Folder* reveals files in Finder, and WAV files can be
+    opened from Finder or by dropping them on the Dock icon.
+  - Native locations: `~/Library/Application Support/VoiceCleaner` and
+    `~/Library/Logs/VoiceCleaner`.
+  - Smooth, click-free playback and stable processing on macOS.
+  - Desktop-audio recording is not available on macOS (no system loopback device);
+    microphone recording works.
+- **Check for Updates** (app menu): shows what's new in a newer release and opens the
+  right download for your computer. Checks automatically once a day (can be turned off;
+  only GitHub's public release information is read, nothing is sent or installed).
+- Error and permission messages no longer assume Windows.
+
 ## 1.0.1
 
 - **Compile tab:** join enhanced takes into one WAV.

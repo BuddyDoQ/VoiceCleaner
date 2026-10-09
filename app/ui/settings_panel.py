@@ -51,7 +51,7 @@ class ValueSlider(QWidget):
         self._update_label()
 
     def value(self) -> float:
-        return self.lo + self.slider.value() * self.step
+        return round(self.lo + self.slider.value() * self.step, 6)  # no float noise like 1.5000000000000002
 
     def set_value(self, v: float, emit: bool = False):
         self.slider.blockSignals(not emit)
@@ -295,6 +295,18 @@ class SettingsPanel(QWidget):
         self._adv(b, "leveler_range_db", "Maximum correction", 2, 20, 0.5, lambda v: f"\u00b1{v:.1f} dB")
         self._adv(b, "leveler_speed_s", "Speed", 0.5, 8, 0.1, lambda v: f"{v:.1f} s",
                   "How quickly the level follows changes. Shorter reacts faster; longer is smoother.")
+        t = QLabel("PAUSES")
+        t.setProperty("role", "section")
+        b.addWidget(t)
+        self.pause_box = QCheckBox("Shorten long pauses on export")
+        self.pause_box.setToolTip("Shortens long silences inside the recording to a natural pause when exporting.\n"
+                                  "The preview keeps the original timing so A/B comparison stays aligned.")
+        self.pause_box.toggled.connect(self._pause_toggled)
+        b.addWidget(self.pause_box)
+        self._adv(b, "pause_min_s", "Pauses longer than", 0.3, 5.0, 0.1, lambda v: f"{v:.1f} s")
+        self._adv(b, "pause_keep_ms", "Shorten to", 0, 2000, 50,
+                  lambda v: "Remove completely" if v < 1 else f"{v:.0f} ms",
+                  "Length each long pause is shortened to. Slide to the left end to remove long pauses completely.")
         t = QLabel("COMPRESSION")
         t.setProperty("role", "section")
         b.addWidget(t)
@@ -305,6 +317,15 @@ class SettingsPanel(QWidget):
         self._adv(b, "comp_attack_ms", "Attack", 1, 100, 1, lambda v: f"{v:.0f} ms")
         self._adv(b, "comp_release_ms", "Release", 20, 1000, 5, lambda v: f"{v:.0f} ms")
         lay.addWidget(sec)
+
+    def _pause_toggled(self, on: bool):
+        self._sync_pause_controls(on)
+        self._advanced_changed("pause_shorten", on)
+
+    def _sync_pause_controls(self, on: bool | None = None):
+        on = self.settings.pause_shorten if on is None else on
+        for key in ("pause_min_s", "pause_keep_ms"):
+            self._advanced[key].setEnabled(on)
 
     def _eq_changed(self, gains: list):
         self.settings = self.settings.copy(eq_gains=list(gains))
@@ -366,11 +387,13 @@ class SettingsPanel(QWidget):
         self.room.set_value(s.room_reduction)
         for key, w in self._advanced.items():
             w.set_value(float(getattr(s, key)))
-        for box, val in ((self.use_ai, s.use_ai), (self.normalize, s.normalize_loudness)):
+        for box, val in ((self.use_ai, s.use_ai), (self.normalize, s.normalize_loudness),
+                         (self.pause_box, s.pause_shorten)):
             box.blockSignals(True)
             box.setChecked(val)
             box.blockSignals(False)
         self.graphic_eq.set_values(list(s.eq_gains))
+        self._sync_pause_controls()
         self._update_eq_curve()
 
     def current(self) -> ProcessingSettings:
@@ -392,6 +415,8 @@ class SettingsPanel(QWidget):
         s.target_lufs, s.peak_ceiling_dbtp = self.settings.target_lufs, self.settings.peak_ceiling_dbtp
         s.normalize_loudness, s.use_ai = self.settings.normalize_loudness, self.settings.use_ai
         s.eq_gains, s.eq_tilt = list(self.settings.eq_gains), self.settings.eq_tilt  # the user's EQ is not a preset
+        s.pause_shorten, s.pause_min_s, s.pause_keep_ms = (self.settings.pause_shorten, self.settings.pause_min_s,
+                                                           self.settings.pause_keep_ms)
         self.set_settings(s)
         self._update_preset_desc()
         self.settingsChanged.emit(self.current())

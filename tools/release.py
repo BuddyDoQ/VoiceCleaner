@@ -248,7 +248,23 @@ desktop audio), sessions and playback. Works offline.
 
 Requirements: Windows 10/11 64-bit, 8 GB RAM. GPU edition: NVIDIA driver 570 or newer.
 """
+    changes = changelog_entry(APP_VERSION)
+    if changes:
+        title, rest = notes.split("\n", 1)
+        notes = f"{title}\n\n### What's new in {APP_VERSION}\n\n{changes}\n{rest}"
     (OUT / "RELEASE_NOTES.md").write_text(notes, encoding="utf-8")
+
+
+def changelog_entry(version: str) -> str:
+    """The CHANGELOG.md section for ``version`` (without its heading)."""
+    try:
+        text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    import re
+
+    m = re.search(rf"^## {re.escape(version)}\s*$(.*?)(?=^## |\Z)", text, flags=re.M | re.S)
+    return m.group(1).strip() if m else ""
 
 
 def publish():

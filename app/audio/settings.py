@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields, replace
 
+from .pauses import DEFAULT_KEEP_MS, DEFAULT_MIN_PAUSE_S
+
 # Graphic EQ bands: (centre Hz, label, filter kind). Octave spacing over the voice range.
 EQ_BANDS: list[tuple[float, str, str]] = [
     (80.0, "Low end", "lowshelf"),
@@ -63,6 +65,11 @@ class ProcessingSettings:
     leveler_amount: float = 0.4
     leveler_range_db: float = 10.0
     leveler_speed_s: float = 2.0
+    # long pauses: shortened on export only, and only when the user turns it on
+    # (presets never enable it). Keep 0 ms = remove long pauses completely.
+    pause_shorten: bool = False
+    pause_min_s: float = DEFAULT_MIN_PAUSE_S
+    pause_keep_ms: float = DEFAULT_KEEP_MS
     compressor_amount: float = 0.45
     comp_threshold_db: float = -24.0
     comp_ratio: float = 2.5
@@ -84,6 +91,11 @@ class ProcessingSettings:
     def from_dict(cls, data: dict) -> "ProcessingSettings":
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in known})
+
+    def pause_settings(self):
+        from .pauses import PauseSettings
+
+        return PauseSettings(self.pause_shorten, self.pause_min_s, self.pause_keep_ms)
 
     def copy(self, **changes) -> "ProcessingSettings":
         changes.setdefault("eq_gains", list(self.eq_gains))

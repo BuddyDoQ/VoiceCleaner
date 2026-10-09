@@ -239,6 +239,7 @@ QToolButton[role="menu"]::menu-indicator {{ image: none; }}
 QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; border-radius: 4px; padding: 6px 10px; selection-background-color: {ACCENT_DARK}; }}
 QComboBox:hover, QLineEdit:hover, QLineEdit:focus {{ border-color: {ACCENT}; }}
 QComboBox::drop-down {{ border: none; width: 22px; }}
+QSpinBox, QDoubleSpinBox {{ font-family: {mono}; }}
 QComboBox QAbstractItemView {{ background: {SURFACE}; border: 1px solid {BORDER_STRONG}; selection-background-color: {SURFACE_3}; selection-color: {TEXT}; outline: none; padding: 4px; }}
 
 QSlider::groove:horizontal {{ height: 4px; background: {SURFACE_3}; border-radius: 2px; }}

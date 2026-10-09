@@ -77,6 +77,7 @@ def scan_folder(root: Path, ctx=None, max_files: int = MAX_FILES) -> tuple[list[
 class PlaybackPanel(QWidget):
     openInEnhancer = Signal(object)  # Path
     addToBatch = Signal(list)
+    addToCompile = Signal(list)
     playStarted = Signal()
 
     def __init__(self, parent=None):
@@ -219,6 +220,13 @@ class PlaybackPanel(QWidget):
         for b in (self.show_btn, self.batch_btn, self.enhance_btn):
             b.setEnabled(False)
             row.addWidget(b)
+        self.compile_btn = QPushButton("Add to Compilation")
+        self.compile_btn.setProperty("role", "outline")
+        self.compile_btn.setToolTip("Add the selected recordings to the Compile tab")
+        self.compile_btn.setEnabled(False)
+        self.compile_btn.clicked.connect(
+            lambda: self.addToCompile.emit(self._selected_paths() or ([self.current] if self.current else [])))
+        row.insertWidget(row.indexOf(self.batch_btn), self.compile_btn)
         v.addLayout(row)
         return c
 
@@ -335,6 +343,7 @@ class PlaybackPanel(QWidget):
         if len(paths) == 1 and paths[0] != self.current:
             self.load(paths[0], autoplay=False)
         self.batch_btn.setEnabled(bool(paths))
+        self.compile_btn.setEnabled(bool(paths))
 
     def _add_selected_to_batch(self):
         paths = self._selected_paths() or ([self.current] if self.current else [])

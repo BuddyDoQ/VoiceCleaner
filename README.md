@@ -253,3 +253,14 @@ standardized intelligibility measure.
 * Clipping is detected and reported but not reconstructed (no declipper yet).
 * Speech buried under very loud noise cannot be fully recovered; the quality check
   favors keeping speech over removing the last bit of noise.
+
+## License
+
+VoiceCleaner's source code is released under the [MIT License](LICENSE).
+
+The Steamburger Studios name and burger logo are trademarks of Steamburger Studios and
+are not covered by the MIT License. Bundled third-party components (DeepFilterNet,
+NVIDIA BigVGAN, PyTorch, Qt and others) keep their own licenses; see
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) and [models/README.md](models/README.md).
+The AI model weights are not stored in this repository. Fetch them with
+`tools/download_models.py`.

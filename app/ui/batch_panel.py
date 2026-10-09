@@ -63,6 +63,7 @@ class BatchPanel(QWidget):
         bottom = QHBoxLayout()
         bottom.addWidget(QLabel("Save to"))
         self.dest = QComboBox()
+        self.dest.addItem("This session's Exports folder", "session")
         self.dest.addItem("Same folder as each original", None)
         self.dest.addItem("Choose folder…", "choose")
         self.dest.activated.connect(self._dest_changed)
@@ -149,20 +150,23 @@ class BatchPanel(QWidget):
             if d:
                 existing = self.dest.findData(d)
                 if existing < 0:
-                    self.dest.insertItem(1, d, d)
-                    existing = 1
+                    self.dest.insertItem(2, d, d)
+                    existing = 2
                 self.dest.setCurrentIndex(existing)
             else:
                 self.dest.setCurrentIndex(0)
 
     def set_output_dir(self, d: str):
-        if d and Path(d).is_dir():
-            self.dest.insertItem(1, d, d)
-            self.dest.setCurrentIndex(1)
+        if d and Path(d).is_dir() and d != "session":
+            self.dest.insertItem(2, d, d)
+            self.dest.setCurrentIndex(2)
 
     @property
-    def output_dir(self) -> Path | None:
+    def output_dir(self):
+        """Path, None (next to each original) or "session"."""
         d = self.dest.currentData()
+        if d == "session":
+            return "session"
         return Path(d) if d and d != "choose" else None
 
     # --- run ----------------------------------------------------------------------------

@@ -64,9 +64,10 @@ class WaveformView(QWidget):
     viewChanged = Signal(float, float)  # visible (t0, t1)
     activated = Signal()
 
-    def __init__(self, color: str, placeholder: str = "", parent=None):
+    def __init__(self, color_role: str, placeholder: str = "", parent=None):
+        """``color_role`` is "original" or "enhanced"; the colour follows the theme."""
         super().__init__(parent)
-        self.color = QColor(color)
+        self.color_role = color_role
         self.placeholder = placeholder
         self.overview: WaveformOverview | None = None
         self.playhead: float = 0.0
@@ -193,7 +194,7 @@ class WaveformView(QWidget):
         half = r.height() / 2 * 0.95
         xs = r.left() + np.arange(width) + 0.5
 
-        color = QColor(self.color)
+        color = QColor(theme.WAVE_ORIGINAL if self.color_role == "original" else theme.WAVE_ENHANCED)
         if not self.active:
             color.setAlpha(150)
         # peak envelope

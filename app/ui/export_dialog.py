@@ -12,7 +12,7 @@ from ..export.wav_exporter import BIT_DEPTH_LABELS, same_file
 
 class ExportDialog(QDialog):
     def __init__(self, source: Path, sample_rate: int, directory: str, fmt: str, bit_depth: str, out_rate: int,
-                 parent=None):
+                 parent=None, suggested_name: str | None = None):
         super().__init__(parent)
         self.setWindowTitle("Export Enhanced Audio")
         self.setMinimumWidth(520)
@@ -29,7 +29,7 @@ class ExportDialog(QDialog):
 
         form = QFormLayout()
         form.setSpacing(10)
-        self.name = QLineEdit(f"{source.stem}_enhanced")
+        self.name = QLineEdit(suggested_name or f"{source.stem}_enhanced")
         form.addRow("File name", self.name)
 
         folder_row = QHBoxLayout()

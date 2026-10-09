@@ -33,6 +33,7 @@ class BatchOptions:
     bit_depth: str = "24"
     sample_rate: int = 0
     mp3_quality: str = "high"
+    session: object = None  # app.sessions.Session: names exports "<Session> - <file> enhanced"
 
 
 def enhance_file(path: Path, options: BatchOptions, model_manager, ctx: TaskContext) -> tuple[Path, object]:
@@ -59,7 +60,10 @@ def enhance_file(path: Path, options: BatchOptions, model_manager, ctx: TaskCont
     result = EnhancementPipeline(model_manager).run(audio, analysis, settings, Sub())
     ctx.progress(0.9, "Exporting...")
     ext = ".wav" if options.fmt == "wav" else ".mp3"
-    out = suggest_output_path(path, options.output_dir, ext=ext)
+    if options.session is not None:
+        out = options.session.export_path(path, ext=ext, directory=options.output_dir or path.parent)
+    else:
+        out = suggest_output_path(path, options.output_dir, ext=ext)
     prog = lambda f: ctx.progress(0.9 + 0.1 * f, "Exporting...")  # noqa: E731
     if options.fmt == "mp3":
         out = export_mp3(result.samples, result.sample_rate, out, options.mp3_quality, options.sample_rate,

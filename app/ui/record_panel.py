@@ -146,9 +146,9 @@ class RecordPanel(QFrame):
         self.setObjectName("recordPanel")
         # keep the strip at its natural height; the waveform below gives way instead
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.setStyleSheet(f"#recordPanel {{ background: {theme.SURFACE_2}; border: 1px solid {theme.BORDER}; "
-                           "border-radius: 10px; }")
+        self.setProperty("role", "inset")
         self.session: RecordingSession | None = None
+        self.output_path_factory = None  # callable -> Path for the next take (set by the window)
         self.has_original = False
         self.original_duration = 0.0
         self.playhead = 0.0
@@ -166,18 +166,18 @@ class RecordPanel(QFrame):
         head = QHBoxLayout()
         title = QLabel("RECORD")
         title.setProperty("role", "section")
-        title.setStyleSheet(f"color: {theme.RECORD};")
+        title.setProperty("tone", "record")
         head.addWidget(title)
         head.addStretch(1)
         self.refresh_btn = QToolButton()
         self.refresh_btn.setText("↻ Refresh devices")
-        self.refresh_btn.setStyleSheet(f"QToolButton {{ border: none; color: {theme.MUTED}; }} QToolButton:hover {{ color: {theme.TEXT}; }}")
+        self.refresh_btn.setProperty("role", "link")
         self.refresh_btn.clicked.connect(self.refresh_sources)
         head.addWidget(self.refresh_btn)
         close = QToolButton()
         close.setText("✕")
         close.setToolTip("Hide the recording controls")
-        close.setStyleSheet(f"QToolButton {{ border: none; color: {theme.MUTED}; padding: 0 4px; }} QToolButton:hover {{ color: {theme.TEXT}; }}")
+        close.setProperty("role", "link")
         close.clicked.connect(self.closeRequested)
         self.close_btn = close
         head.addWidget(close)
@@ -217,7 +217,7 @@ class RecordPanel(QFrame):
         self.discard_btn.setVisible(False)
         act.addWidget(self.discard_btn)
         self.time_label = QLabel("")
-        self.time_label.setStyleSheet("font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11pt;")
+        self.time_label.setProperty("role", "mono")
         act.addWidget(self.time_label)
         act.addStretch(1)
         v.addLayout(act)
@@ -288,7 +288,8 @@ class RecordPanel(QFrame):
             self.status.setText("Choose a microphone or a desktop audio source first.")
             return
         try:
-            self.session = RecordingSession(sources, gains=gains)
+            out = self.output_path_factory() if self.output_path_factory else None
+            self.session = RecordingSession(sources, gains=gains, output_path=out)
             self.session.start()
         except RecordingError as exc:
             self.session = None
@@ -373,7 +374,8 @@ class RecordPanel(QFrame):
         for w in (self.mic_row, self.desk_row, self.mode, self.monitor, self.refresh_btn, self.close_btn):
             w.setEnabled(True)
         self.time_label.setText("")
-        self.time_label.setStyleSheet("font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11pt;")
+        self.time_label.setProperty("tone", "")
+        theme.restyle(self.time_label)
         self.mic_row.meter.reset()
         self.desk_row.meter.reset()
         self.liveUpdate.emit(None, 0.0)
@@ -397,8 +399,9 @@ class RecordPanel(QFrame):
             self._announced = True
             self.captureStarted.emit()
         self.time_label.setText(f"● REC  {format_duration(s.elapsed)}")
-        self.time_label.setStyleSheet(f"color: {theme.RECORD}; font-family: 'Cascadia Mono', Consolas, monospace; "
-                                      "font-size: 11pt; font-weight: 600;")
+        if self.time_label.property("tone") != "record":
+            self.time_label.setProperty("tone", "record")
+            theme.restyle(self.time_label)
         mins, maxs, rms = s.overview()
         if mins.size:
             ov = WaveformOverview(mins, maxs, rms, 48_000, mins.size * 64)

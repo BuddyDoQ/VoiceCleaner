@@ -137,16 +137,21 @@ class RecordingResult:
 class RecordingSession:
     """One take from one or two sources."""
 
-    def __init__(self, sources: list[InputSource], out_dir: Path | None = None, gains: list[float] | None = None):
+    def __init__(self, sources: list[InputSource], out_dir: Path | None = None, gains: list[float] | None = None,
+                 output_path: Path | None = None):
+        """``output_path`` names the finished take (sessions); otherwise a dated name in ``out_dir``."""
         if not sources:
             raise RecordingError("Choose at least one input to record from.")
         if len(sources) > 2:
             raise RecordingError("Up to two inputs can be recorded at the same time.")
         self.sources = sources
         self.gains = gains or [1.0] * len(sources)
-        self.out_dir = out_dir or recordings_dir()
-        stamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-        self.name = f"Recording {stamp}"
+        if output_path is not None:
+            self.out_dir = Path(output_path).parent
+            self.name = Path(output_path).stem
+        else:
+            self.out_dir = out_dir or recordings_dir()
+            self.name = f"Recording {datetime.now():%Y-%m-%d %H-%M-%S}"
         parts = self.out_dir / ".parts"
         parts.mkdir(parents=True, exist_ok=True)
         self._states = [_SourceState(s, parts / f"{self.name} - {i}.f32.wav") for i, s in enumerate(sources)]
@@ -381,7 +386,7 @@ MODES = {
 
 
 def combine_with_original(original: AudioData, take_path: Path, mode: str, position_s: float = 0.0,
-                          latency_s: float = 0.0, take_gain: float = 1.0) -> Path:
+                          latency_s: float = 0.0, take_gain: float = 1.0, out_path: Path | None = None) -> Path:
     """Build a new WAV from the Original plus a take; the Original file is untouched.
 
     ``append`` adds the take after the Original. ``overdub`` mixes the take
@@ -418,9 +423,12 @@ def combine_with_original(original: AudioData, take_path: Path, mode: str, posit
     peak = float(np.abs(out).max(initial=0.0))
     if peak > 1.0:  # layering can exceed full scale; scale down rather than clip
         out /= peak / 0.98
-    stem = original.info.path.stem if original.info else "Original"
-    suffix = "with recording" if mode == "append" else "overdub"
-    path = take_path.with_name(f"{stem} - {suffix} {take_path.stem.removeprefix('Recording ')}.wav")
+    if out_path is not None:
+        path = Path(out_path)
+    else:
+        stem = original.info.path.stem if original.info else "Original"
+        suffix = "with recording" if mode == "append" else "overdub"
+        path = take_path.with_name(f"{stem} - {suffix} {take_path.stem.removeprefix('Recording ')}.wav")
     sf.write(str(path), out, sr, subtype="PCM_24" if original.info is None or original.info.subtype != "FLOAT" else "FLOAT")
     log.info("Combined take with original (%s) -> %s", mode, path)
     return path

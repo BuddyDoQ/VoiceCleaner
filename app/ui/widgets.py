@@ -44,38 +44,6 @@ def card() -> QFrame:
     return f
 
 
-def make_app_icon(size: int = 256) -> QIcon:
-    icon = QIcon()
-    for s in (16, 24, 32, 48, 64, 128, 256):
-        icon.addPixmap(render_icon_pixmap(s))
-    return icon
-
-
-def render_icon_pixmap(size: int) -> QPixmap:
-    pm = QPixmap(size, size)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing)
-    r = QRectF(0, 0, size, size).adjusted(size * 0.04, size * 0.04, -size * 0.04, -size * 0.04)
-    p.setPen(Qt.NoPen)
-    p.setBrush(QColor("#13161d"))
-    p.drawRoundedRect(r, size * 0.22, size * 0.22)
-    # waveform bars: noisy on the left fading into clean on the right
-    heights = [0.18, 0.32, 0.22, 0.46, 0.62, 0.40, 0.70, 0.52, 0.30, 0.16]
-    n = len(heights)
-    bar_w = r.width() * 0.62 / n
-    gap = (r.width() * 0.72 - bar_w * n) / (n - 1)
-    x = r.left() + r.width() * 0.14
-    for i, h in enumerate(heights):
-        c = QColor(theme.ORIGINAL) if i < 3 else QColor(theme.ACCENT)
-        p.setBrush(c)
-        bh = r.height() * h
-        p.drawRoundedRect(QRectF(x, r.center().y() - bh / 2, bar_w, bh), bar_w / 2, bar_w / 2)
-        x += bar_w + gap
-    p.end()
-    return pm
-
-
 class DropZone(QFrame):
     """Large dashed drop target shown before a file is loaded."""
 
@@ -90,10 +58,12 @@ class DropZone(QFrame):
         lay.setAlignment(Qt.AlignCenter)
         lay.setSpacing(14)
         self.icon = QLabel()
-        self.icon.setPixmap(render_icon_pixmap(84))
+        from .brand import logo_pixmap
+
+        self.icon.setPixmap(logo_pixmap(96))
         self.icon.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.icon)
-        title = label("Drop a WAV file here", "title")
+        title = label("DROP A WAV FILE HERE", "display")
         title.setAlignment(Qt.AlignCenter)
         lay.addWidget(title)
         sub = label("VoiceCleaner removes background noise, room echo and hum, and makes speech clear and even.",
@@ -160,9 +130,9 @@ class MetricsPanel(QFrame):
         self.grid.setVerticalSpacing(6)
         self.grid.addWidget(label("", "section"), 0, 0)
         o = label("ORIGINAL", "section")
-        o.setStyleSheet(f"color: {theme.ORIGINAL};")
+        o.setProperty("tone", "original")
         e = label("ENHANCED", "section")
-        e.setStyleSheet(f"color: {theme.ACCENT};")
+        e.setProperty("tone", "accent")
         self.grid.addWidget(o, 0, 1)
         self.grid.addWidget(e, 0, 2)
         self.rows: dict[str, tuple[QLabel, QLabel]] = {}
@@ -180,19 +150,19 @@ class MetricsPanel(QFrame):
 
         sep = QFrame()
         sep.setFixedWidth(1)
-        sep.setStyleSheet(f"background: {theme.BORDER};")
+        sep.setProperty("role", "vdivider")
         outer.addWidget(sep)
 
         right = QVBoxLayout()
         right.setSpacing(4)
         right.addWidget(label("SPEECH CLARITY", "section"))
         self.score = label("—")
-        self.score.setStyleSheet("font-size: 26pt; font-weight: 700;")
+        self.score.setProperty("role", "score")
         right.addWidget(self.score)
         self.score_detail = label("Enhance the recording to compare.", "faint", wrap=True)
         right.addWidget(self.score_detail)
         disclaimer = label("Estimated internal metric, not a standardized intelligibility score.", "faint", wrap=True)
-        disclaimer.setStyleSheet(f"color: {theme.FAINT}; font-size: 8pt;")
+        disclaimer.setProperty("role", "faint")
         right.addWidget(disclaimer)
         right.addSpacing(6)
         self.notes = label("", "muted", wrap=True)
@@ -219,13 +189,15 @@ class MetricsPanel(QFrame):
     def set_score(self, original: float | None, enhanced: float | None):
         if original is None or enhanced is None:
             self.score.setText("—")
-            self.score.setStyleSheet("font-size: 26pt; font-weight: 700;")
+            self.score.setProperty("tone", "")
+            theme.restyle(self.score)
             self.score_detail.setText("Enhance the recording to compare.")
             return
         delta = enhanced - original
-        color = theme.SUCCESS if delta >= 3 else (theme.MUTED if delta > -3 else theme.WARNING)
+        tone = "success" if delta >= 3 else ("muted" if delta > -3 else "warning")
         self.score.setText(f"{delta:+.0f}")
-        self.score.setStyleSheet(f"font-size: 26pt; font-weight: 700; color: {color};")
+        self.score.setProperty("tone", tone)
+        theme.restyle(self.score)
         self.score_detail.setText(f"Estimated clarity {original:.0f} → {enhanced:.0f} (out of 100)")
 
     def set_notes(self, notes: list[str]):

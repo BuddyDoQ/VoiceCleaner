@@ -7,7 +7,7 @@ sys.path.insert(0, str(ROOT))
 
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 
-from app.ui.widgets import render_icon_pixmap  # noqa: E402
+from app.ui.brand import logo_pixmap as render_icon_pixmap  # noqa: E402
 
 
 def main():

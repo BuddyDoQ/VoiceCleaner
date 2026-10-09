@@ -21,9 +21,11 @@ _df_dir = Path(importlib.util.find_spec("df").origin).parent
 df_modules = ["df"] + [f"df.{p.stem}" for p in _df_dir.glob("*.py") if p.stem != "__init__"]
 
 hiddenimports = df_modules + ["libdf", "sounddevice", "_sounddevice_data", "soundfile", "_soundfile_data", "psutil",
-                              "soundcard", "soundcard.mediafoundation", "cffi"]
+                              "soundcard", "soundcard.mediafoundation", "cffi", "PySide6.QtSvg"]
 # soundcard declares the WASAPI API in *.py.h files it reads at import time
 datas = collect_data_files("soundcard", includes=["*.h"])
+# Steamburger Studios brand assets: logo and fonts (SIL Open Font License)
+datas += [("app/ui/assets/SteamburgerLogoIcon.svg", "app/ui/assets"), ("app/ui/assets/fonts", "app/ui/assets/fonts")]
 
 excludes = [
     "tkinter", "matplotlib", "pytest", "pyloudnorm", "pystoi", "librosa", "numba", "llvmlite",

@@ -28,8 +28,7 @@ class CollapsibleSection(QWidget):
         self.button.setCheckable(True)
         self.button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.button.setArrowType(Qt.RightArrow)
-        self.button.setStyleSheet(f"QToolButton {{ border: none; color: {theme.TEXT}; font-weight: 600; "
-                                  f"font-size: 10.5pt; padding: 4px 0; }}")
+        self.button.setProperty("role", "disclosure")
         self.button.toggled.connect(self._toggle)
         head.addWidget(self.button)
         head.addStretch(1)
@@ -136,25 +135,21 @@ class BandSlider(QWidget):
         v.setSpacing(2)
         self.value_label = QLabel("0")
         self.value_label.setAlignment(Qt.AlignCenter)
-        self.value_label.setProperty("role", "faint")
+        self.value_label.setProperty("role", "eqvalue")
         v.addWidget(self.value_label)
         self.slider = QSlider(Qt.Vertical)
         self.slider.setRange(int(-EQ_RANGE_DB * 2), int(EQ_RANGE_DB * 2))  # 0.5 dB steps
         self.slider.setFixedHeight(110)
-        self.slider.setStyleSheet(
-            f"QSlider::groove:vertical {{ width: 4px; background: {theme.SURFACE_3}; border-radius: 2px; }}"
-            f"QSlider::handle:vertical {{ background: {theme.TEXT}; height: 12px; width: 12px; margin: 0 -4px; border-radius: 6px; }}"
-            f"QSlider::add-page:vertical, QSlider::sub-page:vertical {{ background: transparent; }}")
         self.slider.setToolTip(f"{label} ({_fmt_hz(freq)}). Double-click to reset.")
         self.slider.valueChanged.connect(self._changed)
         v.addWidget(self.slider, alignment=Qt.AlignHCenter)
         hz = QLabel(_fmt_hz(freq))
         hz.setAlignment(Qt.AlignCenter)
-        hz.setStyleSheet(f"color: {theme.MUTED}; font-size: 8pt; font-weight: 600;")
+        hz.setProperty("role", "eqfreq")
         v.addWidget(hz)
         name = QLabel(label)
         name.setAlignment(Qt.AlignCenter)
-        name.setStyleSheet(f"color: {theme.FAINT}; font-size: 7.5pt;")
+        name.setProperty("role", "eqname")
         v.addWidget(name)
         self.slider.mouseDoubleClickEvent = lambda _e: self.slider.setValue(0)
 
@@ -170,7 +165,8 @@ class BandSlider(QWidget):
     def _label(self):
         v = self.value()
         self.value_label.setText(f"{v:+.1f}" if v else "0")
-        self.value_label.setStyleSheet(f"color: {theme.ACCENT if v else theme.FAINT}; font-size: 8pt;")
+        self.value_label.setProperty("active", "true" if v else "false")
+        theme.restyle(self.value_label)
 
     def _changed(self, _):
         self._label()

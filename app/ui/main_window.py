@@ -37,7 +37,10 @@ from .export_dialog import ExportDialog
 from .record_panel import RecordPanel
 from .settings_panel import SettingsPanel
 from .waveform import WaveformOverview, WaveformView
-from .widgets import DropZone, ElidedLabel, MetricsPanel, card, label, make_app_icon, render_icon_pixmap
+from .. import sessions
+from .brand import STUDIO_NAME, AboutDialog, OpenSessionDialog, SessionNameDialog, app_icon, logo_pixmap
+from .playback_panel import PlaybackPanel
+from .widgets import DropZone, ElidedLabel, MetricsPanel, card, label
 
 log = get_logger("ui")
 
@@ -60,8 +63,10 @@ class MainWindow(QMainWindow):
         self._result_settings: dict | None = None
         self._pending_warnings: list[str] = []
 
-        self.setWindowTitle(APP_NAME)
-        self.setWindowIcon(make_app_icon())
+        self.session = sessions.current_or_new(config.extra.get("session_path"))
+        self.theme_pref = config.extra.get("theme", "auto")
+        self.setWindowIcon(app_icon())
+        self._update_title()
         self.setAcceptDrops(True)
         self.resize(1360, 880)
         self.setMinimumSize(1060, 700)
@@ -81,49 +86,80 @@ class MainWindow(QMainWindow):
         root.addWidget(self._build_header())
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
-        self.tabs.addTab(self._build_enhance_page(), "Enhance")
+        self.tabs.addTab(self._build_enhance_page(), "ENHANCE")
+        self.playback = PlaybackPanel()
+        self.playback.openInEnhancer.connect(self._open_from_playback)
+        self.playback.addToBatch.connect(self._add_to_batch)
+        self.playback.playStarted.connect(self._pause_main_player)
+        self.tabs.addTab(self.playback, "PLAYBACK")
         self.batch_panel = BatchPanel()
         self.batch_panel.startRequested.connect(self._start_batch)
         self.batch_panel.cancelRequested.connect(self._cancel_batch)
         self.batch_panel.set_output_dir(config.batch_output_dir)
-        self.tabs.addTab(self.batch_panel, "Batch")
+        self.tabs.addTab(self.batch_panel, "BATCH")
+        self.tabs.currentChanged.connect(self._tab_changed)
         self.tabs.tabBar().setStyleSheet("QTabBar { margin-left: 18px; }")
         root.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
 
         self._install_shortcuts()
         self._set_empty_state()
+        self.record_panel.output_path_factory = lambda: self.session.recording_path()
+        self.player.stateChanged.connect(lambda st: st == "playing" and self.playback.pause())
+        self.playback.set_session(self.session, sessions.sessions_root())
         QTimer.singleShot(50, self._init_engine)
 
     # ================================================================================== UI
     def _build_header(self) -> QWidget:
         bar = QFrame()
-        bar.setStyleSheet(f"QFrame#header {{ background: {theme.BG}; border-bottom: 1px solid {theme.BORDER}; }}")
-        bar.setObjectName("header")
+        bar.setProperty("role", "header")
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(20, 12, 16, 12)
+        lay.setContentsMargins(20, 10, 16, 10)
+        lay.setSpacing(10)
         icon = QLabel()
-        icon.setPixmap(render_icon_pixmap(30))
+        icon.setPixmap(logo_pixmap(40))
+        icon.setToolTip(STUDIO_NAME)
         lay.addWidget(icon)
-        title = label(APP_NAME)
-        title.setStyleSheet("font-size: 14pt; font-weight: 700;")
-        lay.addWidget(title)
-        sub = label("Speech enhancement", "faint")
-        lay.addWidget(sub)
+        words = QVBoxLayout()
+        words.setSpacing(0)
+        words.addWidget(label("VOICECLEANER", "brand"))
+        words.addWidget(label("BY STEAMBURGER STUDIOS", "brandsub"))
+        lay.addLayout(words)
+        lay.addSpacing(18)
+        self.session_btn = QPushButton()
+        self.session_btn.setProperty("role", "session")
+        self.session_btn.setToolTip("Sessions group related recordings and exports in their own folder")
+        self.session_btn.setMenu(self._build_session_menu())
+        lay.addWidget(self.session_btn)
+        self._update_session_ui()
         lay.addStretch(1)
-        self.device_chip = label("Detecting hardware…", "chip")
+        self.device_chip = label("Detecting hardware\u2026", "chip")
         self.device_chip.setToolTip("The processor used for AI enhancement. Change it in the menu.")
-        self.model_chip = label("Loading AI model…", "chip")
+        self.model_chip = label("Loading AI model\u2026", "chip")
         lay.addWidget(self.device_chip)
         lay.addWidget(self.model_chip)
+        self.theme_btn = QPushButton()
+        self.theme_btn.setProperty("role", "themetoggle")
+        self.theme_btn.clicked.connect(self._toggle_theme)
+        lay.addWidget(self.theme_btn)
+        self._update_theme_button()
         menu_btn = QToolButton()
-        menu_btn.setText("⋯")
-        menu_btn.setStyleSheet("QToolButton { border: none; font-size: 16pt; padding: 0 8px; color: %s; }"
-                               "QToolButton::menu-indicator { image: none; }" % theme.MUTED)
+        menu_btn.setText("\u22ef")
+        menu_btn.setProperty("role", "menu")
         menu_btn.setPopupMode(QToolButton.InstantPopup)
         menu_btn.setMenu(self._build_menu())
         lay.addWidget(menu_btn)
         return bar
+
+    def _build_session_menu(self) -> QMenu:
+        m = QMenu(self)
+        m.addAction("New Session\u2026", self.new_session, QKeySequence("Ctrl+Shift+N"))
+        m.addAction("Open Session\u2026", self.open_session_dialog)
+        m.addAction("Rename Session\u2026", self.rename_session)
+        m.addSeparator()
+        m.addAction("Open Session Folder", lambda: self._open_folder(self.session.path))
+        m.addAction("Open Default Recordings Folder", lambda: self._open_folder(sessions.sessions_root()))
+        return m
 
     def _build_menu(self) -> QMenu:
         m = QMenu(self)
@@ -140,6 +176,16 @@ class MainWindow(QMainWindow):
             group.addAction(a)
             dev.addAction(a)
             self.device_actions[key] = a
+        appearance = m.addMenu("Appearance")
+        agroup = QActionGroup(self)
+        self.theme_actions = {}
+        for key, text in (("auto", "Automatic (follow Windows)"), ("day", "Day"), ("night", "Night")):
+            a = QAction(text, self, checkable=True)
+            a.setChecked(self.theme_pref == key)
+            a.triggered.connect(lambda _=False, k=key: self.set_theme(k))
+            agroup.addAction(a)
+            appearance.addAction(a)
+            self.theme_actions[key] = a
         m.addSeparator()
         m.addAction("Open Log Folder", lambda: self._open_folder(log_dir()))
         m.addAction("Models and Licenses", self._show_models)
@@ -194,7 +240,7 @@ class MainWindow(QMainWindow):
         lay.addLayout(top)
 
         self.warning_label = label("", wrap=True)
-        self.warning_label.setStyleSheet(f"color: {theme.WARNING};")
+        self.warning_label.setProperty("tone", "warning")
         self.warning_label.setVisible(False)
         lay.addWidget(self.warning_label)
 
@@ -221,11 +267,12 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(14, 10, 14, 8)
         v.setSpacing(4)
         head = QHBoxLayout()
+        tone = "original" if source == "original" else "accent"
         dot = QLabel("●")
-        dot.setStyleSheet(f"color: {color}; font-size: 10pt;")
+        dot.setProperty("tone", tone)
         head.addWidget(dot)
         t = label(title, "section")
-        t.setStyleSheet(f"color: {color};")
+        t.setProperty("tone", tone)
         head.addWidget(t)
         head.addStretch(1)
         if source == "original":
@@ -264,7 +311,7 @@ class MainWindow(QMainWindow):
             self.record_panel.finished.connect(self._recording_finished)
             self.record_panel.failed.connect(self._error)
             v.addWidget(self.record_panel)
-        wave = WaveformView(color, placeholder)
+        wave = WaveformView(source, placeholder)
         v.addWidget(wave, 1)
         return wave, c, vol, play
 
@@ -308,7 +355,7 @@ class MainWindow(QMainWindow):
         self.stop_btn.clicked.connect(self.player.stop)
         lay.addWidget(self.stop_btn)
         self.time_label = label("0:00.0 / 0:00.0")
-        self.time_label.setStyleSheet("font-family: 'Cascadia Mono', Consolas, monospace; font-size: 10.5pt;")
+        self.time_label.setProperty("role", "mono")
         lay.addWidget(self.time_label)
         lay.addStretch(1)
 
@@ -358,7 +405,7 @@ class MainWindow(QMainWindow):
 
         actions = QFrame()
         actions.setObjectName("sidebarActions")
-        actions.setStyleSheet(f"#sidebarActions {{ border: none; border-top: 1px solid {theme.BORDER}; }}")
+        actions.setProperty("role", "actions")
         a = QVBoxLayout(actions)
         a.setContentsMargins(20, 14, 20, 18)
         a.setSpacing(8)
@@ -396,7 +443,7 @@ class MainWindow(QMainWindow):
             s = QShortcut(QKeySequence(key), self)
             s.activated.connect(fn)
 
-        sc(Qt.Key_Space, self.player.toggle_play)
+        sc(Qt.Key_Space, self._toggle_play_current)
         sc(Qt.Key_A, lambda: self._activate("original"))
         sc(Qt.Key_B, lambda: self._activate("enhanced"))
         sc(Qt.Key_Home, lambda: self._seek(0.0))
@@ -462,7 +509,7 @@ class MainWindow(QMainWindow):
         def failed(title, message, _cancelled):
             self._mm_ready.set()
             self.model_chip.setText("AI model unavailable")
-            self.device_chip.setText("Processing device: CPU")
+            self.device_chip.setText("CPU")
             self.settings_panel.set_ai_available(False)
             log.warning("Engine init failed: %s", message)
 
@@ -473,15 +520,18 @@ class MainWindow(QMainWindow):
         if mm is None:
             return
         st = mm.status()
-        self.device_chip.setText(f"Processing device: {st.device.label}")
+        dev_name = st.device.name.removeprefix("NVIDIA ").removeprefix("GeForce ")
+        self.device_chip.setText(f"{'GPU' if st.device.kind == 'cuda' else 'CPU'} · {dev_name}")
+        self.device_chip.setToolTip(f"Processing device: {st.device.label}\nChange it in the menu (⋯).")
         if st.installed and not st.error:
-            self.model_chip.setText(f"AI model: {st.name}")
+            self.model_chip.setText(f"AI · {st.name}")
             self.model_chip.setToolTip(f"{st.name} • license {mm.model.license}\n{mm.model.homepage}")
             self.settings_panel.set_ai_available(True)
         self.settings_panel.set_resynth_status(mm.resynth_available, mm.device.kind)
         if not (st.installed and not st.error):
             self.model_chip.setText("AI model: not installed")
-            self.model_chip.setStyleSheet(f"color: {theme.WARNING};")
+            self.model_chip.setProperty("tone", "warning")
+            theme.restyle(self.model_chip)
             self.model_chip.setToolTip(st.error or f"Model files not found in {models_dir()}.\n"
                                                    "Traditional noise reduction will be used.")
             self.settings_panel.set_ai_available(False)
@@ -871,6 +921,7 @@ class MainWindow(QMainWindow):
         self.record_toggle.setChecked(False)
         self._pending_warnings = list(result.warnings)
         log.info("Take finished: %s mode=%s pos=%.2f latency=%.3f", result.path, mode, position, latency)
+        self.playback.refresh()
         if mode == "new" or self.audio is None:
             self.open_file(result.path)
             return
@@ -878,7 +929,8 @@ class MainWindow(QMainWindow):
         self._busy(True, "Combining recording with the Original...")
 
         def work(ctx):
-            return combine_with_original(original, result.path, mode, position, latency)
+            out = self.session.recording_path(mode)
+            return combine_with_original(original, result.path, mode, position, latency, out_path=out)
 
         combined: list[Path] = []
 
@@ -896,8 +948,10 @@ class MainWindow(QMainWindow):
     def export(self):
         if self.result is None or self._task_running():
             return
-        dlg = ExportDialog(self.audio.info.path, self.result.sample_rate, self.config.last_export_dir,
-                           self.config.output_format, self.config.output_bit_depth, self.config.output_sample_rate, self)
+        suggested = self.session.export_path(self.audio.info.path)
+        dlg = ExportDialog(self.audio.info.path, self.result.sample_rate, str(self.session.exports_dir),
+                           self.config.output_format, self.config.output_bit_depth, self.config.output_sample_rate, self,
+                           suggested_name=suggested.stem)
         if dlg.exec() != ExportDialog.Accepted:
             return
         v = dlg.values()
@@ -921,6 +975,7 @@ class MainWindow(QMainWindow):
 
     def _exported(self, path: Path):
         self._busy(False, f"Saved {path.name}")
+        self.playback.refresh()
         log.info("Exported %s", path)
         box = QMessageBox(self)
         box.setWindowTitle("Export complete")
@@ -937,10 +992,12 @@ class MainWindow(QMainWindow):
     def _start_batch(self, files: list, output_dir):
         if self._batch is not None:
             return
-        self.config.batch_output_dir = str(output_dir) if output_dir else ""
+        self.config.batch_output_dir = str(output_dir) if isinstance(output_dir, Path) else ""
+        if output_dir == "session":
+            output_dir = self.session.exports_dir
         opts = BatchOptions(settings=self.settings_panel.current(), smart=self.settings_panel.smart.isChecked(),
                             output_dir=output_dir, fmt=self.config.output_format, bit_depth=self.config.output_bit_depth,
-                            sample_rate=self.config.output_sample_rate)
+                            sample_rate=self.config.output_sample_rate, session=self.session)
         thread, runner = start_batch([Path(f) for f in files], opts, self._get_model_manager)
         self._batch = (thread, runner)
         bp = self.batch_panel
@@ -960,6 +1017,7 @@ class MainWindow(QMainWindow):
         self._batch = None
         self.batch_panel.set_running(False)
         self.batch_panel.summary.setText(self.batch_panel.summary.text() + " • finished")
+        self.playback.refresh()
 
     # ============================================================================ drag & drop
     def dragEnterEvent(self, e):
@@ -980,7 +1038,8 @@ class MainWindow(QMainWindow):
         if not wavs:
             self._error("Not a WAV file", "VoiceCleaner opens WAV recordings. Drop a .wav file.")
             return
-        if len(wavs) == 1 and self.tabs.currentIndex() == 0:
+        if len(wavs) == 1 and self.tabs.currentWidget() is not self.batch_panel:
+            self.tabs.setCurrentIndex(0)
             self.open_file(wavs[0])
         else:
             self.batch_panel.add_files(wavs)
@@ -1003,9 +1062,112 @@ class MainWindow(QMainWindow):
             "is VoiceCleaner's own signal processing.")
 
     def _show_about(self):
-        QMessageBox.about(self, f"About {APP_NAME}",
-                          f"<b>{APP_NAME} {APP_VERSION}</b><br>Speech cleanup and enhancement for WAV recordings.<br><br>"
-                          "Works fully offline. Your audio never leaves this computer.")
+        lines = ["AI speech enhancement: DeepFilterNet3 (MIT / Apache-2.0)",
+                 "Voice re-synthesis: NVIDIA BigVGAN-v2 (MIT)",
+                 "Fonts: Bebas Neue, Syne, DM Mono (SIL Open Font License)"]
+        AboutDialog(lines, self).exec()
+
+    # ============================================================================ sessions
+    def _update_title(self):
+        self.setWindowTitle(f"{self.session.name} \u2014 {APP_NAME} by {STUDIO_NAME}")
+
+    def _update_session_ui(self):
+        if hasattr(self, "session_btn"):
+            self.session_btn.setText(f"SESSION \u00b7 {self.session.name}  \u25be")
+        self._update_title()
+
+    def _switch_session(self, session):
+        self.session = session
+        self.config.extra["session_path"] = str(session.path)
+        self._update_session_ui()
+        self.playback.set_session(session, sessions.sessions_root())
+        self.status_label.setText(f"Session \u201c{session.name}\u201d. New recordings and exports go to its folder.")
+        log.info("Session: %s (%s)", session.name, session.path)
+
+    def new_session(self):
+        if self.record_panel.recording:
+            self._error("Recording in progress", "Stop the recording before starting a new session.")
+            return
+        dlg = SessionNameDialog("New Session", sessions.default_name(), "Create Session", self)
+        if dlg.exec() != SessionNameDialog.Accepted:
+            return
+        try:
+            self._switch_session(sessions.create(dlg.name))
+        except (sessions.SessionError, OSError) as exc:
+            self._error("Could not create the session", str(exc))
+
+    def open_session_dialog(self):
+        if self.record_panel.recording:
+            self._error("Recording in progress", "Stop the recording before switching sessions.")
+            return
+        dlg = OpenSessionDialog(self.session.name, self)
+        if dlg.exec() != OpenSessionDialog.Accepted or not dlg.chosen:
+            return
+        try:
+            self._switch_session(sessions.open_session(Path(dlg.chosen)))
+        except (sessions.SessionError, OSError) as exc:
+            self._error("Could not open the session", str(exc))
+
+    def rename_session(self):
+        if self.record_panel.recording or self._task_running():
+            self._error("Busy", "Wait until recording or processing has finished, then rename the session.")
+            return
+        dlg = SessionNameDialog("Rename Session", self.session.name, "Rename", self)
+        if dlg.exec() != SessionNameDialog.Accepted:
+            return
+        loaded_inside = self.audio is not None and self.audio.info and self.session.path in self.audio.info.path.parents
+        if loaded_inside:
+            self.player.stop()
+        try:
+            self._switch_session(sessions.rename(self.session, dlg.name))
+        except (sessions.SessionError, OSError) as exc:
+            self._error("Could not rename the session", f"{exc}\n\nClose any program using files in the session folder.")
+
+    # ============================================================================ theme
+    def set_theme(self, pref: str):
+        self.theme_pref = pref
+        mode = theme.apply(QApplication.instance(), pref)
+        if pref in self.theme_actions:
+            self.theme_actions[pref].setChecked(True)
+        self._update_theme_button()
+        log.info("Theme: %s (%s)", pref, mode)
+
+    def _toggle_theme(self):
+        self.set_theme("day" if theme.MODE == "night" else "night")
+
+    def _update_theme_button(self):
+        if hasattr(self, "theme_btn"):
+            night = theme.MODE == "night"
+            self.theme_btn.setText("\u263e" if night else "\u2600")
+            self.theme_btn.setToolTip("Switch to day mode" if night else "Switch to night mode")
+
+    def _system_scheme_changed(self, *_):
+        if self.theme_pref == "auto":
+            self.set_theme("auto")
+
+    # ============================================================================ tabs / playback
+    def _tab_changed(self, index: int):
+        if self.tabs.widget(index) is self.playback:
+            self.playback.refresh()
+
+    def _toggle_play_current(self):
+        if self.tabs.currentWidget() is self.playback:
+            self.playback.toggle_play()
+        else:
+            self.player.toggle_play()
+
+    def _pause_main_player(self):
+        if self.player.state == "playing":
+            self.player.pause()
+
+    def _open_from_playback(self, path):
+        self.playback.pause()
+        self.tabs.setCurrentIndex(0)
+        self.open_file(Path(path))
+
+    def _add_to_batch(self, paths):
+        self.batch_panel.add_files([Path(p) for p in paths])
+        self.tabs.setCurrentWidget(self.batch_panel)
 
     def closeEvent(self, e):
         if self._task_running():
@@ -1016,6 +1178,7 @@ class MainWindow(QMainWindow):
             self._batch[0].wait(3000)
         self.record_panel.shutdown()
         self.player.shutdown()
+        self.playback.shutdown()
         s = self.settings_panel.current()
         c = self.config
         c.window_geometry = bytes(self.saveGeometry().toHex()).decode()
@@ -1027,6 +1190,8 @@ class MainWindow(QMainWindow):
         c.extra["sections"] = self.settings_panel.section_states()
         c.extra["eq_gains"] = list(s.eq_gains)
         c.extra["eq_tilt"] = s.eq_tilt
+        c.extra["session_path"] = str(self.session.path)
+        c.extra["theme"] = self.theme_pref
         try:
             c.save()
         except OSError as exc:

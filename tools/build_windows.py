@@ -45,6 +45,8 @@ def main():
     shutil.copy(ROOT / "models" / "README.md", lic / "MODELS.md")
     shutil.copy(ROOT / "THIRD_PARTY_LICENSES.md", lic / "THIRD_PARTY_LICENSES.md")
     shutil.copy(ROOT / "app" / "ai" / "vendor" / "bigvgan" / "LICENSE", lic / "BigVGAN-LICENSE.txt")
+    for f in (ROOT / "app" / "ui" / "assets" / "fonts").glob("*-OFL.txt"):
+        shutil.copy(f, lic / f.name)
     size = sum(f.stat().st_size for f in DIST.rglob("*") if f.is_file())
     print(f"\nBuilt {DIST / 'VoiceCleaner.exe'}  ({size / 1e9:.2f} GB total)")
 

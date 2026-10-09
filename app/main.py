@@ -88,9 +88,8 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setStyle("Fusion")
-    app.setPalette(theme.palette())
-    app.setFont(theme.app_font())
-    app.setStyleSheet(theme.STYLESHEET)
+    config = UserConfig.load()
+    theme.apply(app, config.extra.get("theme", "auto"))
 
     def excepthook(exc_type, exc, tb):
         log.error("Unhandled exception", exc_info=(exc_type, exc, tb))
@@ -102,7 +101,11 @@ def main() -> int:
 
     sys.excepthook = excepthook
 
-    window = MainWindow(UserConfig.load())
+    window = MainWindow(config)
+    try:  # follow Windows' light/dark setting live when the theme is "Automatic"
+        app.styleHints().colorSchemeChanged.connect(window._system_scheme_changed)
+    except AttributeError:
+        pass
     window.show()
     for arg in sys.argv[1:]:
         p = Path(arg)

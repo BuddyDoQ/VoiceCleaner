@@ -1,4 +1,6 @@
-# VoiceCleaner
+# VoiceCleaner by Steamburger Studios
+
+<https://www.steamburgerstudios.com/>
 
 A desktop application that turns noisy, poorly recorded speech into clean, clear,
 professional-sounding audio. Drop a WAV file, listen to before/after with an instant
@@ -68,7 +70,8 @@ The guiding rule is *better speech, not obviously processed speech*.
   click-free at the same position. *Equal-loudness comparison* plays the original at
   the enhanced loudness so you judge quality, not volume.
 * **Shortcuts:** `Space` play/pause, `A`/`B` switch, `Home` to start, `Ctrl+O` open,
-  `Ctrl+Enter` enhance, `Ctrl+E` export, `R` record/stop, `Esc` cancel. `Ctrl+wheel` zooms the waveform.
+  `Ctrl+Enter` enhance, `Ctrl+E` export, `R` record/stop, `Ctrl+Shift+N` new session,
+  `Esc` cancel. `Space` plays whichever tab is in front (Enhance or Playback). `Ctrl+wheel` zooms the waveform.
 * **Record:** click **● Record** on the Original track (or *Record Audio* on the start
   screen, or press `R`). Pick a microphone (USB, headset, line-in) and/or **desktop
   audio**: anything playing through a chosen speaker or headphone output, captured via
@@ -85,6 +88,23 @@ The guiding rule is *better speech, not obviously processed speech*.
   streamed to disk while recording, so an unplugged USB microphone or a crash keeps
   what was captured. Combined results are written as new files; the original is never
   changed.
+* **Sessions:** a session is a project. *New Session* (header button, or `Ctrl+Shift+N`)
+  creates `Documents\VoiceCleaner Sessions\<name>\` with `Recordings` and `Exports`
+  folders. Every file it creates carries the session name, for example
+  `Episode 12 - Rec 003.wav`, `Episode 12 - Rec 003 enhanced.wav` and
+  `Episode 12 - Rec 004 append.wav`. Names are limited to 32 characters and cleaned of
+  characters Windows does not allow, so file names stay short. Sessions can be opened
+  or renamed (renaming also renames the session's files). The app resumes the last
+  session on start.
+* **Playback tab:** starts with the current session's recordings and exports.
+  * *All Recordings* lists every session in the default recordings folder.
+  * *Browse Folder…* scans any folder, including subfolders. Only WAV files that can
+    actually be played are listed; damaged ones are counted and skipped.
+  * Search, sort, play with a waveform and seek, then *Open in Enhancer*, *Add to
+    Batch* or *Show in Folder*.
+* **Day and night themes:** use the sun/moon button in the header. *Appearance* in the
+  menu also offers *Automatic*, which follows Windows' light/dark setting. Colors and
+  type follow the Steamburger Studios website (Bebas Neue, Syne, DM Mono).
 * **Batch:** drop several files (or a folder). Each file is analyzed and enhanced on its
   own; a damaged file is reported and the rest continue.
 * **Export:** WAV 16-bit (dithered), 24-bit (default) or 32-bit float, original or
@@ -109,7 +129,9 @@ Stereo is handled according to what it contains:
 ```
 app/
   main.py                 entry point, global error handler
-  ui/                     PySide6 interface (main window, waveform, player, settings, batch, export)
+  sessions.py             sessions: folders, naming rules, rename
+  ui/                     PySide6 interface (main window, waveform, player, settings, batch, export,
+                          playback tab, brand/about/session dialogs, day/night theme, assets)
   audio/
     loader.py             validation, float32 conversion, disk-backed buffers for long files
     recorder.py           microphone + desktop-audio (loopback) capture, alignment, append/overdub
@@ -186,6 +208,7 @@ standardized intelligibility measure.
 
 ## Logs and settings
 
+* Sessions (recordings and exports): `Documents\VoiceCleaner Sessions\<session>\`
 * Preferences: `%APPDATA%\VoiceCleaner\config.json`
 * Logs: `%LOCALAPPDATA%\VoiceCleaner\logs\voicecleaner.log`. The log records file
   names, settings, devices, timings and errors, never audio content. It is also

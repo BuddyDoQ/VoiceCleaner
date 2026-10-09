@@ -9,6 +9,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+# isolate: never read or write the real user's preferences or Documents folder
+import os as _os  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+
+_os.environ["APPDATA"] = _tempfile.mkdtemp(prefix="vc_appdata_")
+_os.environ["USERPROFILE"] = _tempfile.mkdtemp(prefix="vc_profile_")
+
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from app.ui import theme  # noqa: E402
@@ -34,9 +41,7 @@ def main():
     setup_logging()
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    app.setPalette(theme.palette())
-    app.setFont(theme.app_font())
-    app.setStyleSheet(theme.STYLESHEET)
+    theme.apply(app, "night")
     w = MainWindow(UserConfig())
     w.resize(1440, 1000)
     w.show()

@@ -91,6 +91,20 @@ def take(tmp_path):
     return p
 
 
+def test_session_output_name(tmp_path):
+    srcs = [InputSource("mic-id", "Mic", "microphone", 1)]
+    s = RecordingSession(srcs, output_path=tmp_path / "Ep 1 - Rec 004.wav")
+    st = s._states[0]
+    sf.write(st.part_path, np.full((SR, 1), 0.1, np.float32), SR, subtype="FLOAT")
+    st.frames, st.max_peak, st.start_time, st.end_time = SR, 0.1, 1.0, 2.0
+    assert s._finalize().path == tmp_path / "Ep 1 - Rec 004.wav"
+
+
+def test_combine_custom_output_path(original, take, tmp_path):
+    out = tmp_path / "Ep 1 - Rec 005 append.wav"
+    assert combine_with_original(original, take, "append", out_path=out) == out and out.exists()
+
+
 def test_combine_new_returns_take(original, take):
     assert combine_with_original(original, take, "new") == take
 

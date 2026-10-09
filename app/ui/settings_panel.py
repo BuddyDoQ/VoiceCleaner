@@ -137,8 +137,7 @@ class SettingsPanel(QWidget):
         self.adv_button.setCheckable(True)
         self.adv_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.adv_button.setArrowType(Qt.RightArrow)
-        self.adv_button.setStyleSheet(f"QToolButton {{ border: none; color: {theme.MUTED}; font-weight: 600; padding: 4px 0; }}"
-                                      f"QToolButton:hover {{ color: {theme.TEXT}; }}")
+        self.adv_button.setProperty("role", "disclosure-muted")
         self.adv_button.toggled.connect(self._toggle_advanced)
         lay.addWidget(self.adv_button)
         self.advanced = QWidget()

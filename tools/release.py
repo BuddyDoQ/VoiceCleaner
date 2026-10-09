@@ -208,7 +208,7 @@ def sha256(path: Path) -> str:
 
 def write_checksums():
     lines = [f"{sha256(p)}  {p.name}" for p in sorted(OUT.iterdir())
-             if p.is_file() and p.name not in ("SHA256SUMS.txt", "RELEASE_NOTES.md")]
+             if p.is_file() and p.name != "SHA256SUMS.txt" and not p.name.startswith("RELEASE_NOTES")]
     (OUT / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -267,8 +267,16 @@ def changelog_entry(version: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+def macos_section(body: str) -> str:
+    """The "## macOS ..." section (to the end) of existing release notes, or ""."""
+    import re
+
+    m = re.search(r"^## macOS\b", body.replace("\r\n", "\n"), flags=re.M)
+    return body.replace("\r\n", "\n")[m.start():].strip() + "\n" if m else ""
+
+
 def publish():
-    assets = [p for p in sorted(OUT.iterdir()) if p.is_file() and p.name != "RELEASE_NOTES.md"]
+    assets = [p for p in sorted(OUT.iterdir()) if p.is_file() and not p.name.startswith("RELEASE_NOTES")]
     too_big = [p.name for p in assets if p.stat().st_size >= 2 * 1024**3]
     if too_big:
         sys.exit(f"Files over GitHub's 2 GB limit: {too_big}")
@@ -276,7 +284,15 @@ def publish():
     exists = subprocess.run([GH, "release", "view", TAG, "-R", REPO], capture_output=True).returncode == 0
     if exists:
         run(GH, "release", "upload", TAG, *assets, "-R", REPO, "--clobber")
-        run(GH, "release", "edit", TAG, "-R", REPO, "--notes-file", OUT / "RELEASE_NOTES.md")
+        notes = OUT / "RELEASE_NOTES.md"
+        current = subprocess.run([GH, "release", "view", TAG, "-R", REPO, "--json", "body", "--jq", ".body"],
+                                 capture_output=True, text=True, encoding="utf-8").stdout
+        mac = macos_section(current)
+        if mac:  # the Mac build is published from a Mac (tools/build_mac.py); keep its section
+            notes = OUT / "RELEASE_NOTES-combined.md"
+            notes.write_text((OUT / "RELEASE_NOTES.md").read_text(encoding="utf-8").rstrip() + "\n\n---\n\n" + mac,
+                             encoding="utf-8")
+        run(GH, "release", "edit", TAG, "-R", REPO, "--notes-file", notes)
     else:
         run(GH, "release", "create", TAG, *assets, "-R", REPO, "--target", "main",
             "--title", f"VoiceCleaner {APP_VERSION}", "--notes-file", OUT / "RELEASE_NOTES.md")

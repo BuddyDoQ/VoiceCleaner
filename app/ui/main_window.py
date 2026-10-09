@@ -39,6 +39,7 @@ from .settings_panel import SettingsPanel
 from .waveform import WaveformOverview, WaveformView
 from .. import sessions
 from .brand import STUDIO_NAME, AboutDialog, OpenSessionDialog, SessionNameDialog, app_icon, logo_pixmap
+from .compile_panel import CompilePanel
 from .playback_panel import PlaybackPanel
 from .widgets import DropZone, ElidedLabel, MetricsPanel, card, label
 
@@ -92,6 +93,11 @@ class MainWindow(QMainWindow):
         self.playback.addToBatch.connect(self._add_to_batch)
         self.playback.playStarted.connect(self._pause_main_player)
         self.tabs.addTab(self.playback, "PLAYBACK")
+        self.compile_panel = CompilePanel()
+        self.compile_panel.exportRequested.connect(self._export_compilation)
+        self.compile_panel.playStarted.connect(self._compile_play_started)
+        self.playback.addToCompile.connect(self._add_to_compile)
+        self.tabs.addTab(self.compile_panel, "COMPILE")
         self.batch_panel = BatchPanel()
         self.batch_panel.startRequested.connect(self._start_batch)
         self.batch_panel.cancelRequested.connect(self._cancel_batch)
@@ -105,8 +111,10 @@ class MainWindow(QMainWindow):
         self._install_shortcuts()
         self._set_empty_state()
         self.record_panel.output_path_factory = lambda: self.session.recording_path()
-        self.player.stateChanged.connect(lambda st: st == "playing" and self.playback.pause())
+        self.player.stateChanged.connect(lambda st: st == "playing" and (self.playback.pause(),
+                                                                         self.compile_panel.pause()))
         self.playback.set_session(self.session, sessions.sessions_root())
+        self.compile_panel.set_session(self.session)
         QTimer.singleShot(50, self._init_engine)
 
     # ================================================================================== UI
@@ -1091,6 +1099,9 @@ class MainWindow(QMainWindow):
         self.config.extra["session_path"] = str(session.path)
         self._update_session_ui()
         self.playback.set_session(session, sessions.sessions_root())
+        self.compile_panel.set_session(session)
+        if self.tabs.currentWidget() is self.compile_panel:
+            self.compile_panel.ensure_populated()
         self.status_label.setText(f"Session \u201c{session.name}\u201d. New recordings and exports go to its folder.")
         log.info("Session: %s (%s)", session.name, session.path)
 
@@ -1159,10 +1170,14 @@ class MainWindow(QMainWindow):
     def _tab_changed(self, index: int):
         if self.tabs.widget(index) is self.playback:
             self.playback.refresh()
+        elif self.tabs.widget(index) is self.compile_panel:
+            self.compile_panel.ensure_populated()
 
     def _toggle_play_current(self):
         if self.tabs.currentWidget() is self.playback:
             self.playback.toggle_play()
+        elif self.tabs.currentWidget() is self.compile_panel:
+            self.compile_panel.toggle_play()
         else:
             self.player.toggle_play()
 
@@ -1174,6 +1189,45 @@ class MainWindow(QMainWindow):
         self.playback.pause()
         self.tabs.setCurrentIndex(0)
         self.open_file(Path(path))
+
+    def _compile_play_started(self):
+        self._pause_main_player()
+        self.playback.pause()
+
+    def _add_to_compile(self, paths):
+        self.playback.pause()
+        self.compile_panel.add_files([Path(p) for p in paths])
+        self.tabs.setCurrentWidget(self.compile_panel)
+
+    def _export_compilation(self, comp, name: str):
+        if comp is None or self._task_running():
+            return
+        source = Path(comp.segments[0][2]) if comp.segments else Path(name)
+        folder = self.session.exports_dir
+        suggested, i = name, 2
+        while (folder / f"{suggested}.wav").exists():
+            suggested = f"{name} ({i})"
+            i += 1
+        dlg = ExportDialog(folder / source.name, comp.sample_rate, str(folder), self.config.output_format,
+                           self.config.output_bit_depth, self.config.output_sample_rate, self,
+                           suggested_name=suggested)
+        dlg.setWindowTitle("Export Compilation")
+        if dlg.exec() != ExportDialog.Accepted:
+            return
+        v = dlg.values()
+        self.status_label.setText("Exporting compilation...")
+
+        def work(ctx):
+            prog = lambda f: ctx.progress(f, "Exporting compilation...")  # noqa: E731
+            if v["format"] == "mp3":
+                return export_mp3(comp.samples, comp.sample_rate, v["path"], v["mp3_quality"], v["sample_rate"],
+                                  progress=prog)
+            return export_wav(comp.samples, comp.sample_rate, v["path"], ExportOptions(v["bit_depth"], v["sample_rate"]),
+                              progress=prog)
+
+        log.info("Exporting compilation of %d takes to %s", len(comp.segments), v["path"])
+        self.task = run_task(work, self, on_success=self._exported, on_error=self._task_failed,
+                             on_progress=lambda f, m: self.compile_panel.preview_state.setText(f"{m} {f:.0%}"))
 
     def _add_to_batch(self, paths):
         self.batch_panel.add_files([Path(p) for p in paths])
@@ -1189,6 +1243,7 @@ class MainWindow(QMainWindow):
         self.record_panel.shutdown()
         self.player.shutdown()
         self.playback.shutdown()
+        self.compile_panel.shutdown()
         s = self.settings_panel.current()
         c = self.config
         c.window_geometry = bytes(self.saveGeometry().toHex()).decode()

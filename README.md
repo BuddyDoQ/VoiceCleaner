@@ -150,6 +150,17 @@ The guiding rule is *better speech, not obviously processed speech*.
     actually be played are listed; damaged ones are counted and skipped.
   * Search, sort, play with a waveform and seek, then *Open in Enhancer*, *Add to
     Batch* or *Show in Folder*.
+* **Compile tab:** joins enhanced takes into a single WAV.
+  * It starts with the current session's enhanced exports. Add more with *Add Files*,
+    by dropping WAV files from Explorer, or with *Add to Compilation* in the Playback tab.
+  * Drag rows to set the order, or use the ▲/▼ buttons or `Ctrl+Up`/`Ctrl+Down`.
+    Double-click a row to hear that take on its own.
+  * Leading and trailing silence of every take is trimmed, keeping up to 100 ms at each
+    end (adjustable) so breaths and soft onsets survive; 5 ms fades prevent clicks.
+  * Optional gap between takes, and optional loudness matching between takes. A
+    true-peak limiter keeps the result from clipping.
+  * Preview the result, then export it to the session's Exports folder as
+    `<Session> - Compilation.wav`.
 * **Day and night themes:** use the sun/moon button in the header. *Appearance* in the
   menu also offers *Automatic*, which follows Windows' light/dark setting. Colors and
   type follow the Steamburger Studios website (Bebas Neue, Syne, DM Mono).
@@ -192,6 +203,7 @@ app/
     leveler.py            speech-aware dynamic leveling
     compressor.py         compressor, soft expander
     loudness.py           BS.1770-4 meter (streaming)
+    compile.py            take trimming and joining (Compile tab)
     limiter.py            true-peak lookahead limiter
     quality.py            before/after metrics, QC checks, clarity estimate
     settings.py           settings, presets, automatic configuration

@@ -30,34 +30,51 @@ Run the tests with `.venv\Scripts\python -m pytest`. To build the standalone app
 
 ## Releasing
 
+Releases ship in two editions built from the same code:
+
+| Edition | PyTorch | For | Packages |
+|---|---|---|---|
+| Standard | CPU (`.venv-cpu`) | every PC | single-file `.msi` (~0.3 GB), portable `.zip` |
+| NVIDIA GPU | CUDA 12.8 (`.venv`) | NVIDIA cards, much faster | ~1 MB web installer, `.msi` + `vcgpu*.cab`, split portable zip |
+
+Neither edition bundles the 490 MB voice re-synthesis model (BigVGAN). The app downloads
+it the first time the feature is used, checksum-verified, into
+`%LOCALAPPDATA%\VoiceCleaner\models`. The 9 MB noise-reduction model is bundled, so
+everything else works offline. With this, every release file fits GitHub's 2 GB
+per-file limit.
+
+One-time setup:
+
 ```powershell
+py -3.11 -m venv .venv-cpu
+.venv-cpu\Scripts\python -m pip install torch==2.11.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cpu
+.venv-cpu\Scripts\python -m pip install -r requirements.txt pyinstaller pytest pyloudnorm
 dotnet tool restore                      # WiX Toolset 5 (pinned in .config/dotnet-tools.json)
-.venv\Scripts\python tools\release.py   # tests, clean build, ZIP, MSI, checksums
+gh auth login                            # GitHub CLI, for publishing
 ```
 
-The release is written to `release\<version>\`:
+Build, and optionally publish to GitHub as release `v<version>`:
 
-| Artifact | What it is |
-|---|---|
-| `VoiceCleaner-<v>-win64-portable.zip` | Standalone app. Unzip anywhere and run `VoiceCleaner.exe`. |
-| `VoiceCleaner-<v>-win64-installer\` | `VoiceCleaner-<v>.msi` plus `vc1.cab`, `vc2.cab`, and so on. |
-| `VoiceCleaner-<v>-win64-installer.zip` | The installer folder as a single download. |
-| `SHA256SUMS.txt` | Checksums of everything above. |
+```powershell
+.venv\Scripts\python tools\release.py              # both editions -> release\<version>.venv\Scripts\python tools\release.py --publish    # ...and upload the GitHub release
+.venv\Scripts\python tools\release.py --publish-only
+```
 
-The installer:
-* installs per-machine into `Program Files\Steamburger Studios\VoiceCleaner`;
-* adds Start Menu and Desktop shortcuts and an Add/Remove Programs entry that links to
-  steamburgerstudios.com;
-* upgrades in place when a newer version is installed.
+How the GPU edition is delivered:
+* **Web installer:** a WiX Burn bundle (`packaging/wix/Bundle.wxs`) that downloads the
+  GPU `.msi` and its cabinets from the GitHub release and verifies every file against a
+  hash recorded at build time. A tampered or corrupted download is rejected.
+* **Portable ZIP:** split into parts under 2 GB. 7-Zip opens the `.001` part directly, or
+  the parts can be joined with `copy /b` and opened in Windows.
 
-The GPU build compresses to about 3 GB, mostly NVIDIA CUDA libraries, which is more
-than Windows Installer can embed in one `.msi`. The files therefore live in external
-LZX cabinets that must stay in the same folder as the `.msi`.
+The installers:
+* install per-machine into `Program Files\Steamburger Studios\VoiceCleaner`;
+* add Start Menu and Desktop shortcuts and an Add/Remove Programs entry;
+* share one upgrade code, so installing either edition replaces the other.
 
-Version numbers come from `APP_VERSION` in `app/utils/config.py`; the same value is
-used for the exe's file properties and the MSI. Keep the MSI `UpgradeCode` unchanged
-between releases. Builds are not code-signed, so Windows SmartScreen will warn on first
-run until the files are signed with a code-signing certificate (`signtool sign`).
+Version numbers come from `APP_VERSION` in `app/utils/config.py`. Keep the MSI and
+bundle upgrade codes unchanged between releases. Builds are not code-signed, so Windows
+SmartScreen warns on first run until they are signed (`signtool sign`).
 
 ## What it does
 

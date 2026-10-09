@@ -26,7 +26,7 @@ from ..audio.pipeline import EnhancementPipeline, PipelineResult
 from ..audio.settings import ProcessingSettings, from_preset
 from ..export.mp3_exporter import export_mp3
 from ..export.wav_exporter import ExportOptions, export_wav
-from ..utils.config import APP_NAME, APP_VERSION, UserConfig, log_dir, models_dir
+from ..utils.config import APP_NAME, APP_VERSION, UserConfig, edition, log_dir, models_dir, user_models_dir
 from ..utils.logging import get_logger
 from ..workers.batch_worker import BatchOptions, start_batch
 from ..workers.processing_worker import TaskHandle, run_task
@@ -523,6 +523,15 @@ class MainWindow(QMainWindow):
         dev_name = st.device.name.removeprefix("NVIDIA ").removeprefix("GeForce ")
         self.device_chip.setText(f"{'GPU' if st.device.kind == 'cuda' else 'CPU'} · {dev_name}")
         self.device_chip.setToolTip(f"Processing device: {st.device.label}\nChange it in the menu (⋯).")
+        if st.device.kind != "cuda" and edition() == "standard":
+            from ..utils.hardware import nvidia_gpu_name
+
+            gpu = nvidia_gpu_name()
+            if gpu:
+                self.device_chip.setText(f"CPU · {gpu.removeprefix('NVIDIA ')} found")
+                self.device_chip.setToolTip(
+                    f"This is the standard (CPU) edition. Your {gpu} can process much faster with the "
+                    "NVIDIA GPU edition of VoiceCleaner (free download on GitHub).")
         if st.installed and not st.error:
             self.model_chip.setText(f"AI · {st.name}")
             self.model_chip.setToolTip(f"{st.name} • license {mm.model.license}\n{mm.model.homepage}")
@@ -824,7 +833,7 @@ class MainWindow(QMainWindow):
             from ..utils.errors import ModelUnavailableError
 
             try:
-                download_file_model(RESYNTH_FOLDER, models_dir(),
+                download_file_model(RESYNTH_FOLDER, user_models_dir(),
                                     progress=lambda f: ctx.progress(f, f"Downloading voice model… {f:.0%}"),
                                     cancelled=lambda: ctx.cancelled)
             except DownloadError as exc:
@@ -837,6 +846,7 @@ class MainWindow(QMainWindow):
         def done(_):
             self._busy(False, "Voice re-synthesis model installed.")
             if self.model_manager is not None:
+                self.model_manager.refresh_model_paths()
                 self.settings_panel.set_resynth_status(True, self.model_manager.device.kind)
 
         self._busy(True, "Downloading voice model...")
@@ -1057,7 +1067,7 @@ class MainWindow(QMainWindow):
             f"<b>AI speech enhancement: {name}</b><br>"
             "Schröter et al., “DeepFilterNet: Perceptually Motivated Real-Time Speech Enhancement” (2023).<br>"
             "License: MIT or Apache-2.0 (dual licensed). Source: github.com/Rikorose/DeepFilterNet<br><br>"
-            f"Model folder: {models_dir()}<br><br>"
+            f"Bundled models: {models_dir()}<br>Downloaded models: {user_models_dir()}<br><br>"
             "All other processing (noise profiling, de-reverberation, EQ, dynamics, loudness, limiting) "
             "is VoiceCleaner's own signal processing.")
 

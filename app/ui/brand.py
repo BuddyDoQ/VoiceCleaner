@@ -67,7 +67,10 @@ class AboutDialog(QDialog):
         words.setSpacing(0)
         words.addWidget(_label("STEAMBURGER STUDIOS", "section", "accent"))
         words.addWidget(_label("VOICECLEANER", "display"))
-        words.addWidget(_label(f"VERSION {APP_VERSION}", "brandsub"))
+        from ..utils.config import edition
+
+        ed = {"gpu": " · NVIDIA GPU EDITION", "standard": " · STANDARD EDITION"}.get(edition(), "")
+        words.addWidget(_label(f"VERSION {APP_VERSION}{ed}", "brandsub"))
         top.addLayout(words, 1)
         v.addLayout(top)
         v.addSpacing(10)

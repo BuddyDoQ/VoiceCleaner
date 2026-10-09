@@ -8,7 +8,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
-from ..utils.config import models_dir
+from ..utils.config import model_path
 from ..utils.errors import ModelUnavailableError
 from ..utils.hardware import DeviceInfo, select_device
 from ..utils.logging import get_logger
@@ -52,10 +52,10 @@ class ModelManager:
         self.device_preference = device_preference
         self.device = select_device(device_preference)
         cls, folder = REGISTRY[model_key]
-        self.model: EnhancementModel = cls(models_dir() / folder)
+        self.model: EnhancementModel = cls(model_path(folder, "config.ini"))
         self.model.device = self.device.torch_device
         self.error = ""
-        self.resynth = BigVGANResynthesizer(models_dir() / RESYNTH_FOLDER)
+        self.resynth = BigVGANResynthesizer(model_path(RESYNTH_FOLDER, "bigvgan_generator.pt"))
         self.resynth_device = self.device
 
     def status(self) -> ModelStatus:
@@ -109,6 +109,12 @@ class ModelManager:
     @property
     def resynth_available(self) -> bool:
         return self.resynth.is_installed()
+
+    def refresh_model_paths(self):
+        """Pick up models downloaded while the app is running."""
+        with self._lock:
+            if not self.resynth.loaded:
+                self.resynth.model_dir = model_path(RESYNTH_FOLDER, "bigvgan_generator.pt")
 
     def get_resynthesizer(self) -> BigVGANResynthesizer:
         """The voice re-synthesis vocoder, loaded on first use (it is large)."""

@@ -69,6 +69,22 @@ def select_device(preference: str = "auto") -> DeviceInfo:
     return gpu
 
 
+@lru_cache(maxsize=1)
+def nvidia_gpu_name() -> str | None:
+    """Name of an NVIDIA GPU via nvidia-smi (works without CUDA PyTorch), or None."""
+    import shutil
+    import subprocess
+
+    exe = shutil.which("nvidia-smi") or "C:/Windows/System32/nvidia-smi.exe"
+    try:
+        out = subprocess.run([exe, "--query-gpu=name", "--format=csv,noheader"], capture_output=True,
+                             text=True, timeout=5, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        name = out.stdout.strip().splitlines()[0].strip() if out.returncode == 0 and out.stdout.strip() else ""
+        return name or None
+    except (OSError, subprocess.SubprocessError, IndexError):
+        return None
+
+
 def available_ram_bytes() -> int:
     return psutil.virtual_memory().available
 

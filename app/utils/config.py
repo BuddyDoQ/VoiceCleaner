@@ -29,8 +29,38 @@ def app_root() -> Path:
 
 
 def models_dir() -> Path:
+    """Models shipped with the application (read-only when installed in Program Files)."""
     override = os.environ.get("VOICECLEANER_MODELS")
     return Path(override) if override else app_root() / "models"
+
+
+def user_models_dir() -> Path:
+    """Models downloaded on demand (always writable, survives app updates)."""
+    override = os.environ.get("VOICECLEANER_USER_MODELS")
+    if override:
+        path = Path(override)
+    else:
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / ".cache")
+        path = Path(base) / APP_NAME / "models"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def model_path(folder: str, marker: str) -> Path:
+    """Where model ``folder`` lives: the bundled copy if it has ``marker``, else the
+    user download location (which is also where a download would put it)."""
+    bundled = models_dir() / folder
+    if (bundled / marker).exists():
+        return bundled
+    return user_models_dir() / folder
+
+
+def edition() -> str:
+    """Build edition written by the release script: "standard" (CPU) or "gpu"."""
+    try:
+        return (app_root() / "edition.txt").read_text(encoding="utf-8").strip() or "source"
+    except OSError:
+        return "source"
 
 
 def user_data_dir() -> Path:

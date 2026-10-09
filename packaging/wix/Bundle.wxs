@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  VoiceCleaner (NVIDIA GPU) web installer: a ~1 MB setup.exe that carries no payload.
+  When run it downloads the GPU .msi and its cabinets from the GitHub release
+  ($(var.BaseUrl) + file name), checks each file against the hash recorded at build
+  time, then installs. GitHub limits release files to 2 GB each; every piece is smaller.
+
+  Built by tools/release.py:
+    wix build packaging/wix/Bundle.wxs -ext WixToolset.BootstrapperApplications.wixext
+        -d Version=... -d MsiFile=<gpu .msi> -d BaseUrl=https://github.com/.../releases/download/v<ver>/
+
+  The bundle UpgradeCode is permanent (separate from the MSI's).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle Name="VoiceCleaner (NVIDIA GPU)"
+          Manufacturer="Steamburger Studios"
+          Version="$(var.Version)"
+          UpgradeCode="4D091A16-0B04-4C3F-8F6E-C033A80402FF"
+          IconSourceFile="$(var.IconFile)"
+          AboutUrl="https://www.steamburgerstudios.com/"
+          HelpUrl="https://github.com/BuddyDoQ/VoiceCleaner"
+          UpdateUrl="https://github.com/BuddyDoQ/VoiceCleaner/releases">
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+          Theme="hyperlinkLicense"
+          LicenseUrl="https://github.com/BuddyDoQ/VoiceCleaner/blob/main/LICENSE"
+          LogoFile="$(var.LogoFile)"
+          ShowVersion="yes" />
+    </BootstrapperApplication>
+
+    <Chain>
+      <!-- Compressed="no": the .msi and its external cabinets are downloaded, not embedded.
+           {2} is each payload's file name: the .msi and vcgpu1.cab, vcgpu2.cab, ... -->
+      <MsiPackage SourceFile="$(var.MsiFile)"
+                  Compressed="no"
+                  DownloadUrl="$(var.BaseUrl){2}"
+                  Vital="yes" />
+    </Chain>
+  </Bundle>
+</Wix>

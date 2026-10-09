@@ -5,16 +5,24 @@
     dotnet tool run wix build packaging/wix/VoiceCleaner.wxs packaging/wix/InstallDirUI.wxs
         -ext WixToolset.UI.wixext -arch x64 -d SourceDir=dist/VoiceCleaner -d Version=1.0.0 ...
 
-  The payload (~5 GB, ~3 GB compressed: mostly NVIDIA CUDA libraries) is larger than
-  Windows Installer can embed in one .msi, so files go into external LZX cabinets
-  (vc1.cab, vc2.cab, ...) that must stay in the same folder as the .msi.
+  Two editions from this one source (-d Edition=standard|gpu):
+    standard  CPU build, ~0.25 GB compressed: one self-contained .msi (embedded cabinet)
+    gpu       NVIDIA build, ~2.6 GB compressed (mostly CUDA libraries): too large to embed,
+              so files go into external LZX cabinets (vcgpu1.cab ...) next to the .msi;
+              the GPU web installer (Bundle.wxs) downloads the .msi and cabinets.
+  Both share one UpgradeCode, so installing either edition replaces the other.
 
   UpgradeCode is permanent: never change it, or new versions will install side by side
   instead of replacing the old one.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-  <Package Name="VoiceCleaner"
+  <?if $(var.Edition) = "gpu" ?>
+    <?define ProductName = "VoiceCleaner (NVIDIA GPU)" ?>
+  <?else?>
+    <?define ProductName = "VoiceCleaner" ?>
+  <?endif?>
+  <Package Name="$(var.ProductName)"
            Manufacturer="Steamburger Studios"
            Version="$(var.Version)"
            UpgradeCode="ACBD84DC-595B-46F8-99CD-A3C44FC22844"
@@ -26,8 +34,12 @@
 
     <MajorUpgrade DowngradeErrorMessage="A newer version of VoiceCleaner is already installed." AllowSameVersionUpgrades="yes" />
 
+    <?if $(var.Edition) = "gpu" ?>
     <!-- external LZX cabinets next to the .msi; ~1.4 GB of uncompressed files per cabinet -->
-    <MediaTemplate EmbedCab="no" CabinetTemplate="vc{0}.cab" CompressionLevel="high" MaximumUncompressedMediaSize="1400" />
+    <MediaTemplate EmbedCab="no" CabinetTemplate="vcgpu{0}.cab" CompressionLevel="high" MaximumUncompressedMediaSize="1400" />
+    <?else?>
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <?endif?>
 
     <!-- Add/Remove Programs entry -->
     <Icon Id="AppIcon.ico" SourceFile="$(var.IconFile)" />

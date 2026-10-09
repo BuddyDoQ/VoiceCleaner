@@ -322,7 +322,8 @@ class EnhancementPipeline:
             from ..ai.resynthesis import Resynthesis
 
             if self.model_manager is None or not self.model_manager.resynth_available:
-                info["notes"].append("Voice re-synthesis was skipped: its model is not installed.")
+                info["notes"].append("Voice re-synthesis was skipped: its model is not downloaded yet. "
+                                      "Download it (490 MB, one time) in the Voice Re-synthesis section.")
             else:
                 try:
                     prog("resynth", 0.0, "Re-synthesizing voice...")

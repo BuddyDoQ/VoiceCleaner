@@ -57,10 +57,11 @@ exe = EXE(
     exclude_binaries=True,
     name="VoiceCleaner",
     icon="assets/voicecleaner.ico",
+    # Windows version resource (Properties > Details); written by tools/release.py
+    version="build/version_info.txt" if Path("build/version_info.txt").exists() else None,
     console=False,
     disable_windowed_traceback=True,
     upx=False,
-    version=None,
 )
 
 coll = COLLECT(exe, a.binaries, a.zipfiles, a.datas, strip=False, upx=False, name="VoiceCleaner")

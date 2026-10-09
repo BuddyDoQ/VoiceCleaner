@@ -8,3 +8,5 @@ test_audio/
 models/*/
 !models/README.md
 *.part
+release/
+.wix/

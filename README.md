@@ -28,6 +28,37 @@ py -3.11 -m venv .venv
 Run the tests with `.venv\Scripts\python -m pytest`. To build the standalone app, run
 `.venv\Scripts\python tools\build_windows.py`; the result is `dist\VoiceCleaner\VoiceCleaner.exe`.
 
+## Releasing
+
+```powershell
+dotnet tool restore                      # WiX Toolset 5 (pinned in .config/dotnet-tools.json)
+.venv\Scripts\python toolselease.py   # tests, clean build, ZIP, MSI, checksums
+```
+
+The release is written to `release\<version>\`:
+
+| Artifact | What it is |
+|---|---|
+| `VoiceCleaner-<v>-win64-portable.zip` | Standalone app. Unzip anywhere and run `VoiceCleaner.exe`. |
+| `VoiceCleaner-<v>-win64-installer\` | `VoiceCleaner-<v>.msi` plus `vc1.cab`, `vc2.cab`, and so on. |
+| `VoiceCleaner-<v>-win64-installer.zip` | The installer folder as a single download. |
+| `SHA256SUMS.txt` | Checksums of everything above. |
+
+The installer:
+* installs per-machine into `Program Files\Steamburger Studios\VoiceCleaner`;
+* adds Start Menu and Desktop shortcuts and an Add/Remove Programs entry that links to
+  steamburgerstudios.com;
+* upgrades in place when a newer version is installed.
+
+The GPU build compresses to about 3 GB, mostly NVIDIA CUDA libraries, which is more
+than Windows Installer can embed in one `.msi`. The files therefore live in external
+LZX cabinets that must stay in the same folder as the `.msi`.
+
+Version numbers come from `APP_VERSION` in `app/utils/config.py`; the same value is
+used for the exe's file properties and the MSI. Keep the MSI `UpgradeCode` unchanged
+between releases. Builds are not code-signed, so Windows SmartScreen will warn on first
+run until the files are signed with a code-signing certificate (`signtool sign`).
+
 ## What it does
 
 | Problem | How VoiceCleaner handles it |

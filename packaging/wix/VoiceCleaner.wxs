@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  VoiceCleaner installer (WiX Toolset 5). Built by tools/release.py:
+
+    dotnet tool run wix build packaging/wix/VoiceCleaner.wxs packaging/wix/InstallDirUI.wxs
+        -ext WixToolset.UI.wixext -arch x64 -d SourceDir=dist/VoiceCleaner -d Version=1.0.0 ...
+
+  The payload (~5 GB, ~3 GB compressed: mostly NVIDIA CUDA libraries) is larger than
+  Windows Installer can embed in one .msi, so files go into external LZX cabinets
+  (vc1.cab, vc2.cab, ...) that must stay in the same folder as the .msi.
+
+  UpgradeCode is permanent: never change it, or new versions will install side by side
+  instead of replacing the old one.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="VoiceCleaner"
+           Manufacturer="Steamburger Studios"
+           Version="$(var.Version)"
+           UpgradeCode="ACBD84DC-595B-46F8-99CD-A3C44FC22844"
+           Scope="perMachine"
+           Compressed="yes"
+           Language="1033">
+
+    <SummaryInformation Description="VoiceCleaner $(var.Version) - speech cleanup and enhancement by Steamburger Studios" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of VoiceCleaner is already installed." AllowSameVersionUpgrades="yes" />
+
+    <!-- external LZX cabinets next to the .msi; ~1.4 GB of uncompressed files per cabinet -->
+    <MediaTemplate EmbedCab="no" CabinetTemplate="vc{0}.cab" CompressionLevel="high" MaximumUncompressedMediaSize="1400" />
+
+    <!-- Add/Remove Programs entry -->
+    <Icon Id="AppIcon.ico" SourceFile="$(var.IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://www.steamburgerstudios.com/" />
+    <Property Id="ARPHELPLINK" Value="https://www.steamburgerstudios.com/" />
+    <Property Id="ARPCONTACT" Value="Steamburger Studios" />
+    <Property Id="ARPCOMMENTS" Value="Speech cleanup and enhancement for WAV recordings." />
+
+    <!-- 64-bit only: PyTorch and the CUDA libraries are x64 -->
+    <Launch Condition="VersionNT64" Message="VoiceCleaner requires 64-bit Windows 10 or later." />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="CompanyFolder" Name="Steamburger Studios">
+        <Directory Id="INSTALLFOLDER" Name="VoiceCleaner" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuFolder" Name="Steamburger Studios" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="VoiceCleaner" Level="1" AllowAbsent="no">
+      <!-- the whole PyInstaller build: exe, _internal runtime, models, licenses -->
+      <Files Include="$(var.SourceDir)\**" Directory="INSTALLFOLDER" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <Component Id="StartMenuShortcut" Directory="AppMenuFolder" Guid="7D3F4E6B-2B0B-4C8E-9C1A-5A3D1E0F7B21">
+      <Shortcut Id="StartMenuShortcut" Name="VoiceCleaner" Description="Speech cleanup and enhancement"
+                Target="[INSTALLFOLDER]VoiceCleaner.exe" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" />
+      <RemoveFolder Id="RemoveStartMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\Steamburger Studios\VoiceCleaner" Name="StartMenuShortcut"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="0E8C2A54-6F1D-4B7A-A3E9-2C5D8B9F4A10" Condition="INSTALLDESKTOPSHORTCUT">
+      <Shortcut Id="DesktopShortcut" Name="VoiceCleaner" Description="Speech cleanup and enhancement"
+                Target="[INSTALLFOLDER]VoiceCleaner.exe" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" />
+      <RegistryValue Root="HKCU" Key="Software\Steamburger Studios\VoiceCleaner" Name="DesktopShortcut"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <StandardDirectory Id="DesktopFolder" />
+    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" />
+
+    <!-- installer UI: welcome, install folder, ready, progress, finish (with "Launch") -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <UIRef Id="VoiceCleanerInstallDirUI" />
+    <WixVariable Id="WixUIBannerBmp" Value="$(var.BannerBmp)" />
+    <WixVariable Id="WixUIDialogBmp" Value="$(var.DialogBmp)" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch VoiceCleaner" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <CustomAction Id="LaunchApplication" DllEntry="WixShellExec" Impersonate="yes" BinaryRef="Wix4UtilCA_X64" />
+  </Package>
+</Wix>

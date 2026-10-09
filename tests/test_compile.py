@@ -104,3 +104,31 @@ def test_no_audible_takes_raises(tmp_path):
     sf.write(p, np.zeros(SR, np.float32) + 1e-6, SR, subtype="FLOAT")
     with pytest.raises(ValueError):
         assemble([load_take(p)])
+
+
+def test_noisy_raw_take_is_trimmed(tmp_path):
+    # un-enhanced take with audible room noise (-40 dBFS): trimming must still find the speech
+    p = _take(tmp_path, "noisy.wav", 1.0, 2.0, 1.5, noise=0.01)
+    x, sr = sf.read(p, dtype="float32", always_2d=True)
+    start, end = trim_points(x, sr, 100)
+    assert abs(start / sr - 0.9) < 0.05 and abs(end / sr - 3.1) < 0.05
+
+
+def test_pause_shortening_in_compilation(tmp_path):
+    from app.audio.pauses import PauseSettings
+
+    sr = SR
+    t = np.arange(sr) / sr
+    burst = (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+    x = np.concatenate([burst, np.zeros(3 * sr, np.float32), burst]) + 1e-4 * np.random.default_rng(1).standard_normal(5 * sr).astype(np.float32)
+    p = tmp_path / "paused.wav"
+    sf.write(p, x, sr, subtype="FLOAT")
+    plain = load_take(p)
+    short = load_take(p, pauses=PauseSettings(enabled=True, min_pause_s=0.7, keep_ms=250))
+    assert plain.cuts == [] and len(short.cuts) == 1
+    assert abs(short.pause_seconds - 2.75) < 0.05
+    comp = assemble([short], match_loudness=False)
+    assert abs(comp.duration - short.final_duration) < 0.01
+    assert abs(comp.pause_seconds - 2.75) < 0.05
+    retrim(short, 100, PauseSettings())  # turning it off again restores the pause
+    assert short.cuts == []

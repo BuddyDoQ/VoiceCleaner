@@ -1,12 +1,15 @@
 """Compile several takes into one WAV.
 
 For every take:
-  1. find where sound starts and ends: the first/last 10 ms frame louder than
-     ``max(-55 dBFS, loudest frame - 45 dB)`` (relative, so quiet takes and
-     enhanced takes with a very low noise floor are both handled);
+  1. find where sound starts and ends: the first/last 10 ms frame above a
+     threshold that follows the take's own noise floor (see
+     :func:`app.audio.pauses.silence_threshold_db`), so enhanced takes with a near
+     silent floor and raw takes with audible room noise are both handled;
   2. keep up to ``handle_ms`` (default 100 ms) of the silence before and after
      it, so breaths and soft consonant onsets are not clipped;
-  3. apply 5 ms fades at the new edges so joins never click.
+  3. optionally shorten long pauses inside the take (off unless chosen, see
+     :mod:`app.audio.pauses`);
+  4. apply 5 ms fades at the new edges so joins never click.
 
 Takes are converted to a common sample rate and channel count (the first
 take's rate, the widest channel layout), optionally levelled to the same
@@ -25,6 +28,7 @@ from scipy import signal
 from . import loudness
 from .limiter import LimiterParams, TruePeakLimiter
 from .loader import AudioData, load_wav
+from .pauses import PauseSettings, apply_cuts, find_cuts, frame_levels, removed_samples, silence_threshold_db
 
 FRAME_S = 0.01
 FADE_S = 0.005
@@ -40,6 +44,7 @@ class Take:
     end: int = 0
     lufs: float = float("-inf")
     overview: np.ndarray = field(default_factory=lambda: np.zeros(0, np.float32), repr=False)
+    cuts: list = field(default_factory=list)  # long inner pauses to remove, absolute [a, b)
 
     @property
     def duration(self) -> float:
@@ -47,7 +52,17 @@ class Take:
 
     @property
     def trimmed_duration(self) -> float:
+        """Length after trimming the ends (before pause shortening)."""
         return max(0, self.end - self.start) / self.sample_rate
+
+    @property
+    def pause_seconds(self) -> float:
+        return removed_samples(self.cuts) / self.sample_rate
+
+    @property
+    def final_duration(self) -> float:
+        """Length in the compilation: ends trimmed and long pauses shortened."""
+        return max(0.0, self.trimmed_duration - self.pause_seconds)
 
     @property
     def silent(self) -> bool:
@@ -56,18 +71,13 @@ class Take:
 
 def detect_sound_bounds(samples: np.ndarray, sr: int) -> tuple[int, int]:
     """Sample range from the first to the last frame that contains sound."""
-    mono = samples.mean(axis=1) if samples.ndim == 2 else samples
-    hop = max(1, int(round(FRAME_S * sr)))
-    n = mono.shape[0] // hop
-    if n == 0:
+    level, hop = frame_levels(samples, sr)
+    if level.size == 0 or level.max() < -90:  # empty or (near) digital silence
         return 0, 0
-    frames = np.asarray(mono[: n * hop], dtype=np.float64).reshape(n, hop)
-    level = 10 * np.log10(np.mean(frames**2, axis=1) + 1e-12)
-    threshold = max(-55.0, float(level.max()) - 45.0)
-    loud = np.flatnonzero(level > threshold)
+    loud = np.flatnonzero(level > silence_threshold_db(level))
     if loud.size == 0:
         return 0, 0
-    return int(loud[0] * hop), int(min(mono.shape[0], (loud[-1] + 1) * hop))
+    return int(loud[0] * hop), int(min(samples.shape[0], (loud[-1] + 1) * hop))
 
 
 def trim_points(samples: np.ndarray, sr: int, handle_ms: float = DEFAULT_HANDLE_MS) -> tuple[int, int]:
@@ -87,17 +97,35 @@ def _overview(samples: np.ndarray, buckets: int = 400) -> np.ndarray:
     return np.array([mono[a:b].max(initial=0.0) for a, b in zip(edges[:-1], edges[1:])], np.float32)
 
 
-def load_take(path: Path, handle_ms: float = DEFAULT_HANDLE_MS) -> Take:
+def _pause_cuts(take: Take, pauses: PauseSettings | None) -> list:
+    if pauses is None or not pauses.active or take.end <= take.start:
+        return []
+    inner = find_cuts(take.samples[take.start:take.end], take.sample_rate, pauses.min_pause_s, pauses.keep_ms)
+    return [(a + take.start, b + take.start) for a, b in inner]
+
+
+def load_take(path: Path, handle_ms: float = DEFAULT_HANDLE_MS, pauses: PauseSettings | None = None) -> Take:
     audio: AudioData = load_wav(path)
     x = np.asarray(audio.samples, dtype=np.float32)
     start, end = trim_points(x, audio.sample_rate, handle_ms)
     lufs = loudness.integrated_loudness(x[start:end], audio.sample_rate) if end > start else float("-inf")
-    return Take(Path(path), x, audio.sample_rate, start, end, lufs, _overview(x))
-
-
-def retrim(take: Take, handle_ms: float) -> Take:
-    take.start, take.end = trim_points(take.samples, take.sample_rate, handle_ms)
+    take = Take(Path(path), x, audio.sample_rate, start, end, lufs, _overview(x))
+    take.cuts = _pause_cuts(take, pauses)
     return take
+
+
+def retrim(take: Take, handle_ms: float, pauses: PauseSettings | None = None) -> Take:
+    take.start, take.end = trim_points(take.samples, take.sample_rate, handle_ms)
+    take.cuts = _pause_cuts(take, pauses)
+    return take
+
+
+def render_take(take: Take) -> np.ndarray:
+    """The take as it appears in the compilation (before rate/channel conversion)."""
+    x = take.samples[take.start:take.end].copy()
+    if take.cuts:
+        x = apply_cuts(x, [(a - take.start, b - take.start) for a, b in take.cuts], take.sample_rate)
+    return x
 
 
 def _convert(x: np.ndarray, sr_from: int, sr_to: int, channels: int) -> np.ndarray:
@@ -123,7 +151,8 @@ class Compilation:
     samples: np.ndarray
     sample_rate: int
     segments: list[tuple[float, float, str]]  # (start s, end s, take name)
-    removed_seconds: float
+    removed_seconds: float  # total: trimmed ends + shortened pauses
+    pause_seconds: float = 0.0  # of which: shortened pauses
 
     @property
     def duration(self) -> float:
@@ -142,9 +171,9 @@ def assemble(takes: list[Take], gap_ms: float = 0.0, match_loudness: bool = True
         if match_loudness and any(np.isfinite(t.lufs) for t in usable) else None
     gap = np.zeros((int(round(gap_ms / 1000 * sr)), channels), np.float32)
     parts, segments, pos = [], [], 0
-    removed = 0.0
+    removed = pauses = 0.0
     for i, t in enumerate(usable):
-        x = _fade(_convert(t.samples[t.start:t.end].copy(), t.sample_rate, sr, channels), sr)
+        x = _fade(_convert(render_take(t), t.sample_rate, sr, channels), sr)
         if target is not None and np.isfinite(t.lufs):
             x *= np.float32(10 ** ((target - t.lufs) / 20))
         if i and gap.shape[0]:
@@ -153,11 +182,12 @@ def assemble(takes: list[Take], gap_ms: float = 0.0, match_loudness: bool = True
         parts.append(x)
         segments.append((pos / sr, (pos + x.shape[0]) / sr, t.path.name))
         pos += x.shape[0]
-        removed += t.duration - t.trimmed_duration
+        removed += t.duration - t.final_duration
+        pauses += t.pause_seconds
         if progress:
             progress((i + 1) / len(usable) * 0.8)
     out = np.concatenate(parts).astype(np.float32)
     out = TruePeakLimiter(sr, LimiterParams(ceiling_dbtp=ceiling_dbtp)).process(out)
     if progress:
         progress(1.0)
-    return Compilation(out, sr, segments, removed)
+    return Compilation(out, sr, segments, removed, pauses)

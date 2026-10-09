@@ -161,6 +161,18 @@ The guiding rule is *better speech, not obviously processed speech*.
     true-peak limiter keeps the result from clipping.
   * Preview the result, then export it to the session's Exports folder as
     `<Session> - Compilation.wav`.
+* **Shorten long pauses (optional, off by default):** pauses inside a recording that are
+  longer than a threshold (0.7 s by default) are shortened to a natural pause (250 ms by
+  default). The kept pause is made of the start and end of the original silence, so
+  breaths and lead-ins survive, joined by a short crossfade so the background tone
+  continues without clicks. Setting the length to 0 ("Remove completely") removes long
+  pauses entirely, an explicit choice. Silence before the first word and after the last
+  is left to trimming. Two places:
+  * **Compile tab:** applied to every take before joining. Rows mark the shortened
+    pauses, and the preview includes them.
+  * **Enhance tab** (Dynamics → Pauses): applied when exporting, including Batch. The
+    preview keeps the original timing, so the A/B comparison stays aligned. The notes
+    say how many pauses will be shortened and the time saved. Presets never enable it.
 * **Day and night themes:** use the sun/moon button in the header. *Appearance* in the
   menu also offers *Automatic*, which follows Windows' light/dark setting. Colors and
   type follow the Steamburger Studios website (Bebas Neue, Syne, DM Mono).
@@ -204,6 +216,7 @@ app/
     compressor.py         compressor, soft expander
     loudness.py           BS.1770-4 meter (streaming)
     compile.py            take trimming and joining (Compile tab)
+    pauses.py             long-pause detection and shortening
     limiter.py            true-peak lookahead limiter
     quality.py            before/after metrics, QC checks, clarity estimate
     settings.py           settings, presets, automatic configuration

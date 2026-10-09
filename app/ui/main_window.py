@@ -63,6 +63,7 @@ class MainWindow(QMainWindow):
         self._batch = None
         self._result_settings: dict | None = None
         self._pending_warnings: list[str] = []
+        self._last_notes: list[str] = []
 
         self.session = sessions.current_or_new(config.extra.get("session_path"))
         self.theme_pref = config.extra.get("theme", "auto")
@@ -698,7 +699,9 @@ class MainWindow(QMainWindow):
         self.metrics.set_enhanced(result.enhanced_metrics.as_rows())
         self.metrics.set_score(result.original_metrics.clarity, result.enhanced_metrics.clarity)
         notes = list(dict.fromkeys(self.settings_panel.auto_notes + result.notes))
+        self._last_notes = notes
         self.metrics.set_notes(notes)
+        self._update_pause_note()
         self._busy(False, "Done. Press Space to listen, and switch A/B to compare.")
         self.speed_label.setText(
             f"Processed {format_duration(result.duration)} in {result.processing_seconds:.1f} s • "
@@ -711,10 +714,37 @@ class MainWindow(QMainWindow):
             self.task.cancel()
             self.status_label.setText("Cancelling...")
 
+    PAUSE_FIELDS = ("pause_shorten", "pause_min_s", "pause_keep_ms")
+
     def _settings_changed(self, s: ProcessingSettings):
         if self.result is not None and self._result_settings is not None:
-            stale = s.to_dict() != self._result_settings
-            self.enhance_btn.setText("Enhance Again" if stale else "Enhance")
+            # pause shortening happens on export, so it never requires enhancing again
+            now = {k: v for k, v in s.to_dict().items() if k not in self.PAUSE_FIELDS}
+            then = {k: v for k, v in self._result_settings.items() if k not in self.PAUSE_FIELDS}
+            self.enhance_btn.setText("Enhance Again" if now != then else "Enhance")
+            self._update_pause_note()
+
+    def _pause_note(self) -> str:
+        if self.result is None:
+            return ""
+        ps = self.settings_panel.current().pause_settings()
+        if not ps.active:
+            return ""
+        from ..audio.pauses import find_cuts, removed_samples
+
+        cuts = find_cuts(self.result.samples, self.result.sample_rate, ps.min_pause_s, ps.keep_ms)
+        if not cuts:
+            return f"No pauses longer than {ps.min_pause_s:.1f} s were found."
+        how = "removed" if ps.keep_ms < 1 else f"shortened to {ps.keep_ms:.0f} ms"
+        return (f"On export, {len(cuts)} long pause{'s' if len(cuts) != 1 else ''} will be {how} "
+                f"(\u2212{removed_samples(cuts) / self.result.sample_rate:.1f} s).")
+
+    def _update_pause_note(self):
+        if self.result is None:
+            return
+        notes = [n for n in self._last_notes if not n.startswith(("On export, ", "No pauses longer"))]
+        note = self._pause_note()
+        self.metrics.set_notes(notes + ([note] if note else []))
 
     # ============================================================================ playback
     def _activate(self, source: str):
@@ -978,14 +1008,22 @@ class MainWindow(QMainWindow):
         self.config.output_bit_depth = v["bit_depth"]
         self.config.output_sample_rate = v["sample_rate"]
         result, source = self.result, self.audio.info.path
+        pauses = self.settings_panel.current().pause_settings()
         self._busy(True, "Exporting...")
 
         def work(ctx):
             prog = lambda f: ctx.progress(f, "Exporting...")  # noqa: E731
+            samples = result.samples
+            if pauses.active:
+                from ..audio.pauses import shorten_pauses
+
+                ctx.progress(0.0, "Shortening long pauses...")
+                samples, removed = shorten_pauses(result.samples, result.sample_rate, pauses)
+                log.info("Shortened long pauses on export: -%.1f s", removed)
             if v["format"] == "mp3":
-                return export_mp3(result.samples, result.sample_rate, v["path"], v["mp3_quality"], v["sample_rate"],
+                return export_mp3(samples, result.sample_rate, v["path"], v["mp3_quality"], v["sample_rate"],
                                   source_path=source, progress=prog)
-            return export_wav(result.samples, result.sample_rate, v["path"],
+            return export_wav(samples, result.sample_rate, v["path"],
                               ExportOptions(v["bit_depth"], v["sample_rate"]), source_path=source, progress=prog)
 
         self.task = run_task(work, self, on_success=self._exported, on_error=self._task_failed,

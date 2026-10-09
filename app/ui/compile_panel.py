@@ -12,11 +12,12 @@ from pathlib import Path
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QFont, QPainter, QPen
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFileDialog, QHBoxLayout, QListWidget,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QListWidget,
                                QListWidgetItem, QPushButton, QSpinBox, QStyle, QStyledItemDelegate, QVBoxLayout,
                                QWidget)
 
 from ..audio.compile import DEFAULT_HANDLE_MS, Take, assemble, load_take, retrim
+from ..audio.pauses import DEFAULT_KEEP_MS, DEFAULT_MIN_PAUSE_S, PauseSettings
 from ..audio.loader import format_duration
 from ..utils.logging import get_logger
 from ..workers.processing_worker import run_task
@@ -85,9 +86,11 @@ class TakeDelegate(QStyledItemDelegate):
         elif take.silent:
             detail, tone = "No audible sound: will be skipped", theme.WARNING
         else:
-            cut = take.duration - take.trimmed_duration
-            detail = (f"{format_duration(take.duration)} → {format_duration(take.trimmed_duration)}"
-                      f"   (−{cut:.1f} s)  ·  {take.sample_rate / 1000:g} kHz")
+            ends = take.duration - take.trimmed_duration
+            detail = f"{format_duration(take.duration)} → {format_duration(take.final_duration)}   (ends −{ends:.1f} s"
+            if take.cuts:
+                detail += f", {len(take.cuts)} pause{'s' if len(take.cuts) != 1 else ''} −{take.pause_seconds:.1f} s"
+            detail += ")"
             tone = theme.MUTED
         p.setPen(theme.qcolor(tone))
         p.drawText(QRectF(x, r.top() + 32, text_w, 18), Qt.AlignLeft | Qt.AlignVCenter, detail)
@@ -112,6 +115,14 @@ class TakeDelegate(QStyledItemDelegate):
             p.setBrush(theme.qcolor(theme.BG, 120))
             p.drawRect(QRectF(wr.left(), wr.top(), wr.width() * k0 / n, wr.height()))
             p.drawRect(QRectF(wr.left() + wr.width() * k1 / n, wr.top(), wr.width() * (1 - k1 / n), wr.height()))
+            # shortened pauses: dimmed, with a thin marker
+            for a, b in take.cuts:
+                xa, xb = wr.left() + a / total * wr.width(), wr.left() + b / total * wr.width()
+                p.setBrush(theme.qcolor(theme.BG, 150))
+                p.setPen(Qt.NoPen)
+                p.drawRect(QRectF(xa, wr.top(), xb - xa, wr.height()))
+                p.setBrush(theme.qcolor(theme.WARNING, 200))
+                p.drawRect(QRectF(xa, wr.bottom() - 2, xb - xa, 2))
         p.restore()
 
 
@@ -272,8 +283,40 @@ class CompilePanel(QWidget):
         opts.addWidget(self.level)
         opts.addStretch(1)
         self.summary = label("", "mono")
+        pause_row = QHBoxLayout()
+        pause_row.setSpacing(14)
+        self.pause_box = QCheckBox("Shorten long pauses")
+        self.pause_box.setChecked(False)  # off by default: always the user's choice
+        self.pause_box.setToolTip("Shortens long silences inside each take (not the ends) to a natural pause.\n"
+                                  "The original files are never changed.")
+        self.pause_box.toggled.connect(self._pauses_changed)
+        pause_row.addWidget(self.pause_box)
+        pause_row.addWidget(label("longer than", "muted"))
+        self.pause_min = QDoubleSpinBox()
+        self.pause_min.setRange(0.3, 5.0)
+        self.pause_min.setSingleStep(0.1)
+        self.pause_min.setDecimals(1)
+        self.pause_min.setSuffix(" s")
+        self.pause_min.setValue(DEFAULT_MIN_PAUSE_S)
+        self.pause_min.setMinimumWidth(100)
+        self.pause_min.valueChanged.connect(self._pauses_changed)
+        pause_row.addWidget(self.pause_min)
+        pause_row.addWidget(label("shorten to", "muted"))
+        self.pause_keep = QSpinBox()
+        self.pause_keep.setRange(0, 2000)
+        self.pause_keep.setSingleStep(50)
+        self.pause_keep.setSuffix(" ms")
+        self.pause_keep.setSpecialValueText("Remove completely")
+        self.pause_keep.setValue(int(DEFAULT_KEEP_MS))
+        self.pause_keep.setMinimumWidth(170)
+        self.pause_keep.setToolTip("Length each long pause is shortened to. Set to 0 to remove long pauses completely.")
+        self.pause_keep.valueChanged.connect(self._pauses_changed)
+        pause_row.addWidget(self.pause_keep)
+        pause_row.addStretch(1)
+        self._sync_pause_controls()
         opts.addWidget(self.summary)
         outer.addLayout(opts)
+        outer.addLayout(pause_row)
 
         outer.addWidget(self._build_preview())
 
@@ -353,13 +396,14 @@ class CompilePanel(QWidget):
             it.setFlags(it.flags() | Qt.ItemIsDragEnabled)
             self.list.addItem(it)
         handle = self.handle.value()
+        pauses = self.pause_settings()
 
         def work(ctx):
             loaded, failed = {}, []
             for i, p in enumerate(new):
                 ctx.check()
                 try:
-                    loaded[p] = load_take(Path(p), handle)
+                    loaded[p] = load_take(Path(p), handle, pauses)
                 except Exception as exc:  # unreadable file: reported, removed from the list
                     failed.append((p, getattr(exc, "user_message", str(exc))))
                 ctx.progress((i + 1) / len(new), f"Loading takes {i + 1}/{len(new)}...")
@@ -407,9 +451,23 @@ class CompilePanel(QWidget):
             it.setSelected(True)
         self._changed()
 
+    def pause_settings(self) -> PauseSettings:
+        return PauseSettings(enabled=self.pause_box.isChecked(), min_pause_s=self.pause_min.value(),
+                             keep_ms=float(self.pause_keep.value()))
+
+    def _sync_pause_controls(self):
+        on = self.pause_box.isChecked()
+        self.pause_min.setEnabled(on)
+        self.pause_keep.setEnabled(on)
+
+    def _pauses_changed(self, *_):
+        self._sync_pause_controls()
+        self._handle_changed(self.handle.value())
+
     def _handle_changed(self, ms: int):
+        pauses = self.pause_settings()
         for t in self.takes.values():
-            retrim(t, ms)
+            retrim(t, ms, pauses)
         self._changed()
 
     def _ordered_takes(self) -> list[Take]:
@@ -427,7 +485,7 @@ class CompilePanel(QWidget):
         self.export_btn.setEnabled(bool(takes))
         if takes:
             before = sum(t.duration for t in takes)
-            after = sum(t.trimmed_duration for t in takes if not t.silent) + \
+            after = sum(t.final_duration for t in takes if not t.silent) + \
                 self.gap.value() / 1000 * max(0, sum(not t.silent for t in takes) - 1)
             self.summary.setText(f"{n} take{'s' if n != 1 else ''} · {format_duration(before)} → "
                                  f"{format_duration(after)}")
@@ -454,8 +512,11 @@ class CompilePanel(QWidget):
             self.wave.highlight_regions = [(a, b) for i, (a, b, _n) in enumerate(comp.segments) if i % 2 == 0]
             self.player.set_source("original", comp.samples, comp.sample_rate)
             self.player.set_active("original")
-            self.preview_state.setText(f"{len(comp.segments)} takes • {format_duration(comp.duration)} • "
-                                       f"{comp.removed_seconds:.1f} s of silence removed")
+            msg = (f"{len(comp.segments)} takes • {format_duration(comp.duration)} • "
+                   f"{comp.removed_seconds:.1f} s of silence removed")
+            if comp.pause_seconds:
+                msg += f" ({comp.pause_seconds:.1f} s from long pauses)"
+            self.preview_state.setText(msg)
             self.time_label.setText(f"0:00.0 / {format_duration(comp.duration)}")
             if then:
                 then()

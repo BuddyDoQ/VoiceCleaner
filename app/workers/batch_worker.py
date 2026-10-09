@@ -58,6 +58,12 @@ def enhance_file(path: Path, options: BatchOptions, model_manager, ctx: TaskCont
             ctx.check()
 
     result = EnhancementPipeline(model_manager).run(audio, analysis, settings, Sub())
+    if settings.pause_settings().active:
+        from ..audio.pauses import shorten_pauses
+
+        ctx.progress(0.88, "Shortening long pauses...")
+        result.samples, removed = shorten_pauses(result.samples, result.sample_rate, settings.pause_settings())
+        log.info("Batch: shortened long pauses in %s by %.1f s", path.name, removed)
     ctx.progress(0.9, "Exporting...")
     ext = ".wav" if options.fmt == "wav" else ".mp3"
     if options.session is not None:

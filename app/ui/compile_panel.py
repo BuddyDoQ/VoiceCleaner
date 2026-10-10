@@ -20,6 +20,7 @@ from ..audio.compile import DEFAULT_HANDLE_MS, Take, assemble, load_take, retrim
 from ..audio.pauses import DEFAULT_KEEP_MS, DEFAULT_MIN_PAUSE_S, PauseSettings
 from ..audio.loader import format_duration
 from ..utils.logging import get_logger
+from ..utils.shell import shortcut_text
 from ..workers.processing_worker import run_task
 from . import theme
 from .audio_player import AudioPlayer
@@ -225,11 +226,11 @@ class CompilePanel(QWidget):
         self.remove_btn.clicked.connect(self.remove_selected)
         up = QPushButton("▲")
         up.setProperty("role", "icon")
-        up.setToolTip("Move up (Ctrl+Up)")
+        up.setToolTip(f"Move up ({shortcut_text('Ctrl+Up')})")
         up.clicked.connect(lambda: self.move_selected(-1))
         down = QPushButton("▼")
         down.setProperty("role", "icon")
-        down.setToolTip("Move down (Ctrl+Down)")
+        down.setToolTip(f"Move down ({shortcut_text('Ctrl+Down')})")
         down.clicked.connect(lambda: self.move_selected(1))
         clear = QPushButton("Clear")
         clear.setProperty("role", "ghost")

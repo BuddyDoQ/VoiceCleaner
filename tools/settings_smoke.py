@@ -25,6 +25,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 from app.ui import theme  # noqa: E402
 from app.ui.main_window import MainWindow  # noqa: E402
 from app.utils import user_presets  # noqa: E402
+from app.utils.shell import shortcut_text  # noqa: E402
 from app.utils.config import UserConfig  # noqa: E402
 from app.utils.logging import setup_logging  # noqa: E402
 
@@ -138,7 +139,8 @@ def main():
     close_message_boxes(app, seen)
     w._show_shortcuts()
     pump(app, lambda: bool(seen), 10)
-    check("shortcuts dialog lists Space and Ctrl+Enter", "Space" in seen[0][1] and "Ctrl+Enter" in seen[0][1])
+    enhance_keys = shortcut_text("Ctrl+Enter")  # ⌘↩ on macOS
+    check(f"shortcuts dialog lists Space and {enhance_keys}", "Space" in seen[0][1] and enhance_keys in seen[0][1])
     w._fill_recent_menu()
     print("     recent menu:", [a.text() for a in w.recent_menu.actions() if a.text()])
     w.close()

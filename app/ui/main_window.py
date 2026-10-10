@@ -28,7 +28,7 @@ from ..export.wav_exporter import ExportOptions, export_wav
 from ..utils import updates, user_presets
 from ..utils.config import APP_NAME, APP_VERSION, UserConfig, edition, log_dir, models_dir, user_models_dir
 from ..utils.logging import get_logger
-from ..utils.shell import reveal
+from ..utils.shell import reveal, shortcut_text
 from ..workers.batch_worker import BatchOptions, start_batch
 from ..workers.processing_worker import TaskHandle, run_task
 from . import theme
@@ -516,7 +516,7 @@ class MainWindow(QMainWindow):
         self.enhance_btn = QPushButton("Enhance")
         self.enhance_btn.setProperty("role", "primary")
         self.enhance_btn.setCursor(Qt.PointingHandCursor)
-        self.enhance_btn.setToolTip("Process the recording with the current settings (Ctrl+Enter)")
+        self.enhance_btn.setToolTip(f"Process the recording with the current settings ({shortcut_text('Ctrl+Enter')})")
         self.enhance_btn.clicked.connect(self.enhance)
         row.addWidget(self.enhance_btn, 1)
         self.cancel_btn = QPushButton("Cancel")
@@ -1475,7 +1475,7 @@ class MainWindow(QMainWindow):
             self.open_file(path)
 
     def _show_shortcuts(self):
-        rows = "".join(f"<tr><td style='padding:3px 18px 3px 0'><b>{k}</b></td><td>{v}</td></tr>"
+        rows = "".join(f"<tr><td style='padding:3px 18px 3px 0'><b>{shortcut_text(k)}</b></td><td>{v}</td></tr>"
                        for k, v in SHORTCUTS)
         QMessageBox.information(self, "Keyboard Shortcuts", f"<table>{rows}</table>")
 

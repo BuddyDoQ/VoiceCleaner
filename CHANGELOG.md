@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.5
+
+- **Update check on every start:** VoiceCleaner now checks for a newer version each time it
+  opens and shows it right away. Before, it checked at most once a day, so opening the app
+  usually showed nothing even when an update was out.
+  - *Later* (or closing the update window) hides that version until the next day;
+    *Skip Version* hides it for good. A newer release is always shown.
+  - Turn automatic checks off with the checkbox in the update window.
+
 ## 1.0.4
 
 - **Sharper Steamburger logo and app icon:** the logo is now true vector artwork, so it stays

@@ -5,8 +5,11 @@ Three layers:
 * **Preset** - a starting point (Natural, Clean Voice, Podcast, ...).
 * **Smart settings** - the analysis of the loaded recording adjusts the
   preset: noisy recordings get more noise reduction, clean ones get less,
-  reverberant ones get room reduction, hum gets notched.
-* **User** - the simple sliders and the advanced controls.
+  reverberant ones get room reduction, hum gets notched. While Smart is on it
+  owns :data:`SMART_FIELDS` (the UI locks those controls); everything else
+  stays the user's.
+* **User** - the simple sliders and the advanced controls. Users can save the
+  whole set as their own preset (see :mod:`app.utils.user_presets`).
 
 The three simple sliders drive several advanced parameters at once via
 :func:`apply_simple`; advanced controls can then be fine-tuned individually.
@@ -137,6 +140,28 @@ PRESETS: dict[str, Preset] = {p.name: p for p in [
 ]}
 DEFAULT_PRESET = "Clean Voice"
 
+# User presets: complete settings saved by the user, registered here by
+# app.utils.user_presets so presets can be resolved by name everywhere.
+USER_PRESETS: dict[str, dict] = {}
+
+# Fields Smart settings decides for each recording (it "always wins" on these).
+SMART_FIELDS = ("noise_reduction", "speech_enhancement", "room_reduction", "spectral_subtraction",
+                "max_attenuation_db", "lf_cleanup", "tonal_balance", "reverb_reduction", "echo_reduction",
+                "compressor_amount", "hum_removal")
+# Built-in presets leave these alone: loudness, AI on/off, EQ and pauses are the user's.
+USER_OWNED_FIELDS = ("target_lufs", "peak_ceiling_dbtp", "normalize_loudness", "use_ai", "eq_gains", "eq_tilt",
+                     "pause_shorten", "pause_min_s", "pause_keep_ms")
+# Not shown as controls, so never part of "modified".
+INTERNAL_FIELDS = ("preset", "hum_removal", "highpass_hz", "quality_control")
+
+
+def preset_names() -> list[str]:
+    return list(PRESETS) + [n for n in USER_PRESETS if n not in PRESETS]
+
+
+def is_user_preset(name: str) -> bool:
+    return name in USER_PRESETS and name not in PRESETS
+
 
 def apply_simple(s: ProcessingSettings, noise: float, speech: float, room: float) -> ProcessingSettings:
     """Map the three simple sliders onto the advanced parameters."""
@@ -158,6 +183,13 @@ def apply_simple(s: ProcessingSettings, noise: float, speech: float, room: float
 
 
 def from_preset(name: str, base: ProcessingSettings | None = None) -> ProcessingSettings:
+    """Settings for preset ``name`` on top of ``base``. A built-in preset sets the
+    processing amounts and keeps the user's own fields (loudness, EQ, pauses) from
+    ``base``; a user preset restores everything it saved."""
+    if is_user_preset(name):
+        known = {f.name for f in fields(ProcessingSettings)}
+        saved = {k: v for k, v in USER_PRESETS[name].items() if k in known and k != "preset"}
+        return (base or ProcessingSettings()).copy(**saved, preset=name)
     p = PRESETS.get(name, PRESETS[DEFAULT_PRESET])
     s = (base or ProcessingSettings()).copy(
         preset=p.name, compressor_amount=p.compressor_amount, comp_ratio=p.comp_ratio,
@@ -175,22 +207,22 @@ class AutoDecision:
 
 def auto_configure(preset_name: str, analysis: AnalysisResult, base: ProcessingSettings | None = None) -> AutoDecision:
     """Adapt a preset to the recording ("smart settings")."""
-    p = PRESETS.get(preset_name, PRESETS[DEFAULT_PRESET])
-    s = from_preset(p.name, base)
+    s = from_preset(preset_name, base)
+    p_noise, p_speech, p_room = s.noise_reduction, s.speech_enhancement, s.room_reduction
     notes: list[str] = []
 
     need_noise = float(np.clip((40.0 - analysis.snr_db) / 30.0, 0.0, 1.0))
-    noise = p.noise + (need_noise - 0.5) * 0.6
+    noise = p_noise + (need_noise - 0.5) * 0.6
     if analysis.speech_level_dbfs < -40:
         noise += 0.1
-    room = p.room
+    room = p_room
     if analysis.rt60_s is None:
-        room = p.room * 0.6
+        room = p_room * 0.6
     else:
-        room = p.room + (analysis.reverb_amount - 0.3) * 0.8
+        room = p_room + (analysis.reverb_amount - 0.3) * 0.8
         if analysis.reverb_amount < 0.1:
             room = min(room, 0.15)
-    speech = p.speech
+    speech = p_speech
 
     if analysis.is_clean:
         noise = min(noise, 0.15)
@@ -217,3 +249,46 @@ def auto_configure(preset_name: str, analysis: AnalysisResult, base: ProcessingS
         # compression lifts reverb tails between words, which costs intelligibility
         s.compressor_amount = round(s.compressor_amount * (1.0 - 0.7 * analysis.reverb_amount), 3)
     return AutoDecision(s, notes)
+
+
+def preset_reference(name: str, current: ProcessingSettings | None = None) -> ProcessingSettings:
+    """Exactly what preset ``name`` gives: every control at the preset's value, except
+    that a built-in preset keeps the user's own fields (loudness, AI, EQ, pauses) from
+    ``current``. Used for "Reset to preset", "modified" and double-click reset."""
+    if is_user_preset(name):
+        return from_preset(name, ProcessingSettings())
+    base = ProcessingSettings()
+    if current is not None:
+        base = base.copy(**{k: getattr(current, k) for k in USER_OWNED_FIELDS if k != "eq_gains"},
+                         eq_gains=list(current.eq_gains))
+    return from_preset(name, base)
+
+
+def smart_adapt(current: ProcessingSettings, analysis: AnalysisResult) -> AutoDecision:
+    """Smart settings for a recording: ``current`` with only :data:`SMART_FIELDS`
+    replaced by the analysis-based values for its preset. The user's other
+    choices (re-synthesis, leveling, EQ, ...) are kept."""
+    dec = auto_configure(current.preset, analysis, current)
+    return AutoDecision(current.copy(**{k: getattr(dec.settings, k) for k in SMART_FIELDS}), dec.notes)
+
+
+def modified_fields(current: ProcessingSettings, reference: ProcessingSettings, smart: bool) -> list[str]:
+    """Controls where ``current`` differs from what its preset gives (``reference``).
+    With Smart on, the fields Smart owns are not the user's changes."""
+    skip = set(INTERNAL_FIELDS) | (set(SMART_FIELDS) if smart else set())
+    if not is_user_preset(current.preset):
+        skip |= set(USER_OWNED_FIELDS)
+    out = []
+    for f in fields(ProcessingSettings):
+        if f.name in skip:
+            continue
+        a, b = getattr(current, f.name), getattr(reference, f.name)
+        if isinstance(a, list):
+            if len(a) != len(b) or any(abs(float(x) - float(y)) > 1e-6 for x, y in zip(a, b)):
+                out.append(f.name)
+        elif isinstance(a, bool) or isinstance(b, bool):
+            if bool(a) != bool(b):
+                out.append(f.name)
+        elif abs(float(a) - float(b)) > 1e-6:
+            out.append(f.name)
+    return out

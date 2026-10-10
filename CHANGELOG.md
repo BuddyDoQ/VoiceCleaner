@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.3
+
+- **Settings are remembered:** every control, not just a few, is restored at the next start.
+- **Smart settings now clearly win, and only where they apply:** while *Smart settings* is on,
+  Noise, Speech and Room (and the controls tied to them) are locked and marked **AUTO**, with a
+  note explaining why. Your other settings (re-synthesis, leveling, EQ, ...) are no longer reset
+  when you open another recording. With Smart off, opening a recording changes nothing.
+  Batch processing follows the same rules.
+- **Your own presets:** *Save as…* next to the preset list stores all current settings as a
+  preset. The `⋯` menu updates, renames or deletes it, or shows the presets folder.
+- **MODIFIED** appears next to the preset when you change a control; *Reset* returns to the
+  preset. Double-click a slider to reset just that one.
+- **Open Recent** and **Keyboard Shortcuts** (`Ctrl+/`) in the app menu.
+- **Export:** optional *Show the file in Explorer when done* (remembered).
+- **Fixed:** the *Enhance* and *Export* buttons could be squeezed and their labels clipped
+  when the status text wrapped. Status lines now stay on one line (full text in the tooltip).
+- **Fixed:** in a narrow window the sidebar covered the right end of the playback controls;
+  they now move to a second row.
+
 ## 1.0.2
 
 - **macOS:** VoiceCleaner now runs natively on Apple Silicon Macs (DMG and zip).

@@ -11,9 +11,9 @@ import time
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QByteArray, Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QEvent, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QApplication, QBoxLayout, QButtonGroup, QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
                                QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
                                QSlider, QStackedWidget, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
@@ -22,10 +22,10 @@ from ..audio.analyzer import analyze
 from ..audio.loader import format_duration, format_size, load_wav
 from ..audio.recorder import combine_with_original
 from ..audio.pipeline import EnhancementPipeline, PipelineResult
-from ..audio.settings import ProcessingSettings, from_preset
+from ..audio.settings import ProcessingSettings, apply_simple, from_preset, preset_names
 from ..export.mp3_exporter import export_mp3
 from ..export.wav_exporter import ExportOptions, export_wav
-from ..utils import updates
+from ..utils import updates, user_presets
 from ..utils.config import APP_NAME, APP_VERSION, UserConfig, edition, log_dir, models_dir, user_models_dir
 from ..utils.logging import get_logger
 from ..utils.shell import reveal
@@ -48,6 +48,23 @@ from .widgets import DropZone, ElidedLabel, MetricsPanel, card, label
 log = get_logger("ui")
 
 WAV_EXTENSIONS = (".wav", ".wave")
+MAX_RECENT = 10
+
+SHORTCUTS = [
+    ("Space", "Play / pause"),
+    ("A", "Listen to the original"),
+    ("B", "Listen to the enhanced version"),
+    ("Home", "Back to the start"),
+    ("Ctrl+Enter", "Enhance"),
+    ("Ctrl+E", "Export enhanced audio"),
+    ("Ctrl+O", "Open a WAV file"),
+    ("R", "Record / stop recording"),
+    ("Ctrl+Shift+N", "New session"),
+    ("Esc", "Cancel"),
+    ("Ctrl+/", "This list"),
+    ("Ctrl+mouse wheel", "Zoom the waveform"),
+    ("Double-click a slider", "Reset it to the preset's value"),
+]
 
 
 class MainWindow(QMainWindow):
@@ -73,7 +90,9 @@ class MainWindow(QMainWindow):
         self._update_title()
         self.setAcceptDrops(True)
         self.resize(1360, 880)
-        self.setMinimumSize(1060, 700)
+        avail = QApplication.primaryScreen().availableGeometry() if QApplication.primaryScreen() else None
+        # never larger than the screen, so small or scaled displays can still fit the window
+        self.setMinimumSize(min(1060, avail.width()) if avail else 1060, min(700, avail.height() - 40) if avail else 700)
         if config.window_geometry:
             self.restoreGeometry(QByteArray.fromHex(config.window_geometry.encode()))
 
@@ -183,6 +202,8 @@ class MainWindow(QMainWindow):
     def _build_menu(self) -> QMenu:
         m = QMenu(self)
         m.addAction("Open WAV…", self.choose_file, QKeySequence.Open)
+        self.recent_menu = m.addMenu("Open Recent")
+        self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
         self.export_action = m.addAction("Export Enhanced Audio…", self.export, QKeySequence("Ctrl+E"))
         m.addSeparator()
         dev = m.addMenu("Processing device")
@@ -206,6 +227,7 @@ class MainWindow(QMainWindow):
             appearance.addAction(a)
             self.theme_actions[key] = a
         m.addSeparator()
+        m.addAction("Keyboard Shortcuts", self._show_shortcuts, QKeySequence("Ctrl+/"))
         m.addAction("Open Log Folder", lambda: self._open_folder(log_dir()))
         m.addAction("Models and Licenses", self._show_models)
         self.update_action = m.addAction("Check for Updates\u2026", lambda: self.check_for_updates(manual=True))
@@ -234,7 +256,10 @@ class MainWindow(QMainWindow):
         editor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         editor_scroll.setFrameShape(QFrame.NoFrame)
         editor_scroll.setWidget(self._build_editor())
+        self.editor_scroll = editor_scroll
+        editor_scroll.installEventFilter(self)
         self.stack.addWidget(editor_scroll)
+        self.stack.currentChanged.connect(lambda _: QTimer.singleShot(0, self._fit_transport))
         lay.addWidget(self.stack, 1)
         lay.addWidget(self._build_sidebar())
         return page
@@ -337,9 +362,20 @@ class MainWindow(QMainWindow):
 
     def _build_transport(self) -> QWidget:
         c = card()
-        lay = QHBoxLayout(c)
-        lay.setContentsMargins(14, 10, 14, 10)
+        # two groups that sit side by side, or stack when the window is narrow (see _fit_transport)
+        self.transport_box = QBoxLayout(QBoxLayout.LeftToRight, c)
+        self.transport_box.setContentsMargins(14, 10, 14, 10)
+        self.transport_box.setSpacing(10)
+        self.transport_left, self.transport_right = QWidget(), QWidget()
+        lay = QHBoxLayout(self.transport_left)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
+        right = QHBoxLayout(self.transport_right)
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(10)
+        self.transport_box.addWidget(self.transport_left, 0, Qt.AlignLeft)
+        self.transport_box.addStretch(1)
+        self.transport_box.addWidget(self.transport_right, 0, Qt.AlignLeft)
         self.ab_orig = QPushButton("ORIGINAL")
         self.ab_enh = QPushButton("ENHANCED")
         for b, side in ((self.ab_orig, "left"), (self.ab_enh, "right")):
@@ -377,24 +413,45 @@ class MainWindow(QMainWindow):
         self.time_label = label("0:00.0 / 0:00.0")
         self.time_label.setProperty("role", "mono")
         lay.addWidget(self.time_label)
-        lay.addStretch(1)
 
         self.match_box = QCheckBox("Equal-loudness comparison")
         self.match_box.setToolTip("Plays the original at the same loudness as the enhanced version, so the\n"
                                   "comparison is about quality rather than volume.")
         self.match_box.setChecked(self.config.match_loudness_ab)
         self.match_box.toggled.connect(self._update_match_gain)
-        lay.addWidget(self.match_box)
-        lay.addSpacing(8)
+        right.addWidget(self.match_box)
+        right.addSpacing(8)
 
         self.learn_btn = QPushButton("Learn Noise Profile")
         self.learn_btn.setToolTip("Drag across a part of the ORIGINAL waveform that contains only background\n"
                                   "noise (no speech), then click here. VoiceCleaner will remove that noise.")
         self.learn_btn.clicked.connect(self.learn_noise_profile)
-        lay.addWidget(self.learn_btn)
+        right.addWidget(self.learn_btn)
         self.profile_label = label("", "faint")
-        lay.addWidget(self.profile_label)
+        right.addWidget(self.profile_label)
+        right.addStretch(1)
         return c
+
+    def _fit_transport(self):
+        """Stack the transport controls in two rows when one row does not fit the editor,
+        instead of letting the sidebar cover them. Decided from the visible width, so the
+        choice cannot feed back into the layout's own minimum size."""
+        if not hasattr(self, "transport_box"):
+            return
+        avail = self.editor_scroll.viewport().width() - 44 - 28  # editor and card margins
+        need = self.transport_left.sizeHint().width() + self.transport_right.sizeHint().width() + 30
+        direction = QBoxLayout.LeftToRight if need <= avail else QBoxLayout.TopToBottom
+        if self.transport_box.direction() != direction:
+            self.transport_box.setDirection(direction)
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.Resize, QEvent.Show) and obj is getattr(self, "editor_scroll", None):
+            self._fit_transport()
+        return super().eventFilter(obj, event)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        QTimer.singleShot(0, self._fit_transport)
 
     def _build_sidebar(self) -> QWidget:
         side = QFrame()
@@ -411,13 +468,18 @@ class MainWindow(QMainWindow):
         inner.setMaximumWidth(360)
         il = QVBoxLayout(inner)
         il.setContentsMargins(20, 18, 20, 18)
-        initial = from_preset(self.config.preset)
-        initial = initial.copy(target_lufs=self.config.target_lufs, peak_ceiling_dbtp=self.config.peak_ceiling_dbtp)
-        if isinstance(self.config.extra.get("eq_gains"), list):
+        initial = self._initial_settings()
+        if initial is None:  # preferences from 1.0.2 or earlier
+            initial = from_preset(self.config.preset if self.config.preset in preset_names() else "Clean Voice")
+            initial = initial.copy(target_lufs=self.config.target_lufs, peak_ceiling_dbtp=self.config.peak_ceiling_dbtp)
+            if not self.config.auto_settings:
+                initial = apply_simple(initial, self.config.noise_reduction, self.config.speech_enhancement,
+                                       self.config.room_reduction)
+        if isinstance(self.config.extra.get("eq_gains"), list) and "settings" not in self.config.extra:
             initial = initial.copy(eq_gains=[float(g) for g in self.config.extra["eq_gains"]],
                                    eq_tilt=float(self.config.extra.get("eq_tilt", 0.0)))
         pauses = self.config.extra.get("pauses")
-        if isinstance(pauses, dict):
+        if isinstance(pauses, dict) and "settings" not in self.config.extra:
             try:
                 initial = initial.copy(pause_shorten=bool(pauses.get("shorten", False)),
                                        pause_min_s=float(pauses.get("min_s", initial.pause_min_s)),
@@ -437,12 +499,16 @@ class MainWindow(QMainWindow):
         a = QVBoxLayout(actions)
         a.setContentsMargins(20, 14, 20, 18)
         a.setSpacing(8)
-        self.status_label = label("", "muted")
+        # one line each (full text in the tooltip): wrapped text here used to take its
+        # height from the buttons below and clip their labels
+        self.status_label = ElidedLabel("", mode=Qt.ElideRight, tooltip=True)
+        self.status_label.setProperty("role", "muted")
         self.progress = QProgressBar()
         self.progress.setRange(0, 1000)
         self.progress.setTextVisible(False)
         self.progress.setFixedHeight(8)
-        self.speed_label = label("", "faint", wrap=True)
+        self.speed_label = ElidedLabel("", mode=Qt.ElideRight, tooltip=True)
+        self.speed_label.setProperty("role", "faint")
         a.addWidget(self.status_label)
         a.addWidget(self.progress)
         a.addWidget(self.speed_label)
@@ -462,6 +528,10 @@ class MainWindow(QMainWindow):
         self.export_btn.setCursor(Qt.PointingHandCursor)
         self.export_btn.clicked.connect(self.export)
         a.addWidget(self.export_btn)
+        for b in (self.enhance_btn, self.cancel_btn, self.export_btn):
+            b.setSizePolicy(b.sizePolicy().horizontalPolicy(), QSizePolicy.Fixed)
+            b.setMinimumHeight(b.sizeHint().height())
+        actions.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         v.addWidget(actions)
         self.settings_panel.settingsChanged.connect(self._settings_changed)
         return side
@@ -659,6 +729,7 @@ class MainWindow(QMainWindow):
         self.metrics.set_notes(self.settings_panel.auto_notes)
         self.stack.setCurrentIndex(1)
         self.record_panel.set_original(True, audio.duration)
+        self._remember_recent(info.path)
         self._busy(False, "Ready. Adjust settings if you like, then click Enhance.")
         self.speed_label.setText(f"{format_duration(info.duration)} of audio • analyzed automatically")
         log.info("Loaded %s", info.path)
@@ -726,7 +797,7 @@ class MainWindow(QMainWindow):
             f"Processed {format_duration(result.duration)} in {result.processing_seconds:.1f} s • "
             f"{result.realtime_factor:.1f}x realtime • {result.device_label}")
         if result.attempts > 1:
-            self.speed_label.setText(self.speed_label.text() + f"\nQuality check adjusted settings ({result.attempts} passes).")
+            self.speed_label.setText(self.speed_label.text() + f" • Quality check adjusted settings ({result.attempts} passes).")
 
     def cancel_task(self):
         if self._task_running():
@@ -1018,10 +1089,11 @@ class MainWindow(QMainWindow):
         suggested = self.session.export_path(self.audio.info.path)
         dlg = ExportDialog(self.audio.info.path, self.result.sample_rate, str(self.session.exports_dir),
                            self.config.output_format, self.config.output_bit_depth, self.config.output_sample_rate, self,
-                           suggested_name=suggested.stem)
+                           suggested_name=suggested.stem, reveal_after=self._reveal_after_export)
         if dlg.exec() != ExportDialog.Accepted:
             return
         v = dlg.values()
+        self.config.extra["reveal_after_export"] = v["reveal"]
         self.config.last_export_dir = str(v["path"].parent)
         self.config.output_format = v["format"]
         self.config.output_bit_depth = v["bit_depth"]
@@ -1048,10 +1120,17 @@ class MainWindow(QMainWindow):
         self.task = run_task(work, self, on_success=self._exported, on_error=self._task_failed,
                              on_progress=self._on_progress)
 
+    @property
+    def _reveal_after_export(self) -> bool:
+        return bool(self.config.extra.get("reveal_after_export", False))
+
     def _exported(self, path: Path):
         self._busy(False, f"Saved {path.name}")
         self.playback.refresh()
         log.info("Exported %s", path)
+        if self._reveal_after_export:  # the user chose to go straight to the file
+            reveal(path)
+            return
         box = QMessageBox(self)
         box.setWindowTitle("Export complete")
         box.setIcon(QMessageBox.Information)
@@ -1323,11 +1402,12 @@ class MainWindow(QMainWindow):
             i += 1
         dlg = ExportDialog(folder / source.name, comp.sample_rate, str(folder), self.config.output_format,
                            self.config.output_bit_depth, self.config.output_sample_rate, self,
-                           suggested_name=suggested)
+                           suggested_name=suggested, reveal_after=self._reveal_after_export)
         dlg.setWindowTitle("Export Compilation")
         if dlg.exec() != ExportDialog.Accepted:
             return
         v = dlg.values()
+        self.config.extra["reveal_after_export"] = v["reveal"]
         self.status_label.setText("Exporting compilation...")
 
         def work(ctx):
@@ -1345,6 +1425,59 @@ class MainWindow(QMainWindow):
     def _add_to_batch(self, paths):
         self.batch_panel.add_files([Path(p) for p in paths])
         self.tabs.setCurrentWidget(self.batch_panel)
+
+    # ============================================================================ settings
+    def _initial_settings(self) -> ProcessingSettings | None:
+        """The settings from the last session (1.0.3+), or None."""
+        user_presets.load_all()
+        saved = self.config.extra.get("settings")
+        if not isinstance(saved, dict):
+            return None
+        try:
+            s = ProcessingSettings.from_dict(saved)
+        except (TypeError, ValueError):
+            log.warning("Saved settings could not be read; starting from the preset")
+            return None
+        if s.preset not in preset_names():  # its user preset was deleted: keep the sound
+            s = s.copy(preset="Clean Voice")
+        return s
+
+    # ============================================================================ recent files
+    def _remember_recent(self, path: Path):
+        items = [p for p in self.config.extra.get("recent_files", []) if isinstance(p, str)]
+        p = str(path)
+        items = [p] + [x for x in items if os.path.normcase(x) != os.path.normcase(p)]
+        self.config.extra["recent_files"] = items[:MAX_RECENT]
+
+    def _fill_recent_menu(self):
+        m = self.recent_menu
+        m.clear()
+        items = [p for p in self.config.extra.get("recent_files", []) if isinstance(p, str)]
+        for i, p in enumerate(items):
+            path = Path(p)
+            text = f"&{(i + 1) % 10}  {path.name}" if i < 10 else path.name
+            a = m.addAction(text, lambda _=False, x=path: self._open_recent(x))
+            a.setToolTip(str(path))
+            a.setStatusTip(str(path))
+            if not path.exists():
+                a.setEnabled(False)
+                a.setText(f"{text}  (missing)")
+        if not items:
+            m.addAction("No recent files").setEnabled(False)
+        else:
+            m.addSeparator()
+            m.addAction("Clear Recent Files", lambda: self.config.extra.update(recent_files=[]))
+        m.setToolTipsVisible(True)
+
+    def _open_recent(self, path: Path):
+        self.tabs.setCurrentIndex(0)
+        if path.exists():
+            self.open_file(path)
+
+    def _show_shortcuts(self):
+        rows = "".join(f"<tr><td style='padding:3px 18px 3px 0'><b>{k}</b></td><td>{v}</td></tr>"
+                       for k, v in SHORTCUTS)
+        QMessageBox.information(self, "Keyboard Shortcuts", f"<table>{rows}</table>")
 
     def closeEvent(self, e):
         if self._task_running():
@@ -1366,6 +1499,7 @@ class MainWindow(QMainWindow):
         c.target_lufs, c.peak_ceiling_dbtp = s.target_lufs, s.peak_ceiling_dbtp
         c.advanced_open = self.settings_panel.advanced_open
         c.extra["sections"] = self.settings_panel.section_states()
+        c.extra["settings"] = s.to_dict()  # every control, restored at the next start
         c.extra["pauses"] = {"shorten": s.pause_shorten, "min_s": s.pause_min_s, "keep_ms": s.pause_keep_ms}
         c.extra["compile"] = self.compile_panel.options()
         c.extra["eq_gains"] = list(s.eq_gains)

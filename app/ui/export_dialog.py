@@ -3,16 +3,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
                                QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QWidget)
 
 from ..export.mp3_exporter import mp3_supported
 from ..export.wav_exporter import BIT_DEPTH_LABELS, same_file
+from ..utils.shell import FILE_MANAGER
 
 
 class ExportDialog(QDialog):
     def __init__(self, source: Path, sample_rate: int, directory: str, fmt: str, bit_depth: str, out_rate: int,
-                 parent=None, suggested_name: str | None = None):
+                 parent=None, suggested_name: str | None = None, reveal_after: bool = False):
         super().__init__(parent)
         self.setWindowTitle("Export Enhanced Audio")
         self.setMinimumWidth(520)
@@ -72,6 +73,10 @@ class ExportDialog(QDialog):
         form.addRow("Sample rate", self.rate)
         lay.addLayout(form)
 
+        self.reveal_box = QCheckBox(f"Show the file in {FILE_MANAGER} when done")
+        self.reveal_box.setChecked(reveal_after)
+        lay.addWidget(self.reveal_box)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
         self.ok = buttons.addButton("Export", QDialogButtonBox.AcceptRole)
         self.ok.setProperty("role", "primary")
@@ -117,4 +122,5 @@ class ExportDialog(QDialog):
         return {
             "path": self.output_path, "format": self.format.currentData(), "bit_depth": self.depth.currentData(),
             "sample_rate": self.rate.currentData(), "mp3_quality": self.quality.currentData(),
+            "reveal": self.reveal_box.isChecked(),
         }

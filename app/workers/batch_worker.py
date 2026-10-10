@@ -13,7 +13,7 @@ from PySide6.QtCore import QObject, QThread, Signal, Slot
 from ..audio.analyzer import analyze
 from ..audio.loader import load_wav
 from ..audio.pipeline import EnhancementPipeline
-from ..audio.settings import ProcessingSettings, auto_configure
+from ..audio.settings import ProcessingSettings, smart_adapt
 from ..export.mp3_exporter import export_mp3
 from ..export.wav_exporter import ExportOptions, export_wav, suggest_output_path
 from ..utils.errors import CancelledError, VoiceCleanerError, friendly_message
@@ -42,13 +42,8 @@ def enhance_file(path: Path, options: BatchOptions, model_manager, ctx: TaskCont
     audio = load_wav(path)
     ctx.check()
     analysis = analyze(audio.samples, audio.sample_rate, progress=lambda f: ctx.progress(0.1 * f, "Analyzing audio..."))
-    settings = auto_configure(options.settings.preset, analysis, options.settings).settings if options.smart \
-        else options.settings
-    if options.smart:  # user loudness choices win over the preset
-        settings = settings.copy(target_lufs=options.settings.target_lufs,
-                                 peak_ceiling_dbtp=options.settings.peak_ceiling_dbtp,
-                                 normalize_loudness=options.settings.normalize_loudness,
-                                 use_ai=options.settings.use_ai)
+    # Smart sets only the controls it owns for each file; the user's other choices stay
+    settings = smart_adapt(options.settings, analysis).settings if options.smart else options.settings
 
     class Sub:
         def progress(self, f, m=""):

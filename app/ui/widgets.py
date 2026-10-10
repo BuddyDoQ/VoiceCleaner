@@ -21,21 +21,36 @@ def label(text: str = "", role: str | None = None, wrap: bool = False) -> QLabel
 class ElidedLabel(QLabel):
     """Single-line label that shortens long text with an ellipsis instead of widening its parent."""
 
-    def __init__(self, text: str = "", parent=None):
+    def __init__(self, text: str = "", parent=None, mode=Qt.ElideMiddle, tooltip: bool = False):
         super().__init__(text, parent)
+        self.mode = mode
+        self._auto_tip = tooltip  # show the full text as a tooltip
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setMinimumWidth(40)
+        if tooltip:
+            self.setToolTip(text)
+
+    def setText(self, text: str):
+        super().setText(text)
+        if self._auto_tip:
+            self.setToolTip(text)
 
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setFont(self.font())
         p.setPen(self.palette().color(self.foregroundRole()))
-        text = self.fontMetrics().elidedText(self.text(), Qt.ElideMiddle, self.width())
+        text = self.fontMetrics().elidedText(" ".join(self.text().split()), self.mode, self.width())
         p.drawText(self.rect(), int(self.alignment() | Qt.AlignVCenter), text)
 
     def sizeHint(self):
         sh = super().sizeHint()
-        return sh.expandedTo(sh)
+        sh.setHeight(self.fontMetrics().height() + 2)  # always one line, whatever the text
+        return sh
+
+    def minimumSizeHint(self):
+        sh = super().minimumSizeHint()
+        sh.setHeight(self.fontMetrics().height() + 2)
+        return sh
 
 
 def card() -> QFrame:

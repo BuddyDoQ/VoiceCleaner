@@ -182,6 +182,9 @@ QLabel[role="eqvalue"] {{ color: {FAINT}; font-family: {mono}; font-size: 7.5pt;
 QLabel[role="eqvalue"][active="true"] {{ color: {ACCENT}; }}
 QLabel[role="eqfreq"] {{ color: {MUTED}; font-family: {mono}; font-size: 7.5pt; }}
 QLabel[role="eqname"] {{ color: {FAINT}; font-size: 7pt; }}
+QLabel[role="tag"] {{ font-family: {mono}; font-size: 7.5pt; letter-spacing: 1px; color: {WARNING}; }}
+QLabel[role="smartnote"] {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-left: 3px solid {ACCENT}; border-radius: 4px; padding: 6px 8px; color: {MUTED}; font-size: 8.5pt; }}
+QLabel[auto="true"] {{ color: {ACCENT}; font-family: {mono}; font-size: 8pt; }}
 
 QFrame[role="card"] {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 10px; }}
 QFrame[role="inset"] {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 10px; }}
@@ -247,6 +250,7 @@ QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }}
 QSlider::handle:horizontal {{ background: {TEXT}; width: 16px; height: 16px; margin: -6px 0; border-radius: 8px; }}
 QSlider::handle:horizontal:hover {{ background: {ACCENT}; }}
 QSlider::sub-page:horizontal:disabled {{ background: {BORDER_STRONG}; }}
+QSlider::handle:horizontal:disabled {{ background: {FAINT}; }}
 QSlider[role="small"]::handle:horizontal {{ width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; }}
 QSlider::groove:vertical {{ width: 4px; background: {SURFACE_3}; border-radius: 2px; }}
 QSlider::handle:vertical {{ background: {TEXT}; height: 12px; width: 12px; margin: 0 -4px; border-radius: 6px; }}

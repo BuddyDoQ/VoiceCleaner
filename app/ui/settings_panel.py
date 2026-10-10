@@ -1,15 +1,23 @@
-"""Enhancement controls: preset, three simple sliders, collapsible advanced section."""
+"""Enhancement controls: preset, three simple sliders, collapsible advanced section.
+
+Smart settings ("adapt to each recording") always win on the controls they set
+(:data:`SMART_FIELDS`): while Smart is on those controls are locked and marked
+AUTO. Every other control is the user's and survives loading another recording.
+"""
 from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
-                               QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMenu,
+                               QMessageBox, QPushButton, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget)
 
 from ..audio.analyzer import AnalysisResult
 from ..audio.eq import VoiceEQParams, choose_highpass, manual_bands
-from ..audio.settings import PRESETS, ProcessingSettings, apply_simple, auto_configure, from_preset
+from ..audio.settings import (DEFAULT_PRESET, PRESETS, SMART_FIELDS, ProcessingSettings, apply_simple,
+                              is_user_preset, modified_fields, preset_names, preset_reference, smart_adapt)
+from ..utils import user_presets
+from ..utils.shell import FILE_MANAGER, open_folder
 from . import theme
 from .tone_widgets import CollapsibleSection, EQCurve, GraphicEQ
 
@@ -18,11 +26,14 @@ class ValueSlider(QWidget):
     """Slider mapping an integer track onto a float range, with a value label."""
 
     valueChanged = Signal(float)
+    resetRequested = Signal()  # double-click: back to the preset's value
 
     def __init__(self, label: str, lo: float, hi: float, step: float, fmt: Callable[[float], str],
                  tooltip: str = "", large: bool = False, parent=None):
         super().__init__(parent)
         self.lo, self.hi, self.step, self.fmt = lo, hi, step, fmt
+        self._auto = False
+        self._tip = tooltip
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4 if large else 2)
@@ -45,10 +56,38 @@ class ValueSlider(QWidget):
         if not large:
             self.slider.setProperty("role", "small")
         self.slider.valueChanged.connect(self._changed)
+        self.slider.installEventFilter(self)
+        self.label.installEventFilter(self)
         lay.addWidget(self.slider)
-        if tooltip:
-            self.setToolTip(tooltip)
+        self._update_tooltip()
         self._update_label()
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonDblClick and self.slider.isEnabled():
+            self.resetRequested.emit()
+            return True
+        return super().eventFilter(obj, event)
+
+    def set_auto(self, on: bool):
+        """Locked and marked AUTO: Smart settings set this control for each recording."""
+        if on == self._auto:
+            return
+        self._auto = on
+        self.slider.setEnabled(not on)
+        self.value_label.setProperty("auto", "true" if on else "false")
+        self.value_label.style().unpolish(self.value_label)
+        self.value_label.style().polish(self.value_label)
+        self._update_tooltip()
+        self._update_label()
+
+    def _update_tooltip(self):
+        tip = self._tip
+        if self._auto:
+            tip = (tip + "\n\n" if tip else "") + "AUTO: set for each recording by Smart settings.\n" \
+                "Turn off \u201cSmart settings\u201d to adjust it yourself."
+        else:
+            tip = (tip + "\n\n" if tip else "") + "Double-click to reset to the preset's value."
+        self.setToolTip(tip)
 
     def value(self) -> float:
         return round(self.lo + self.slider.value() * self.step, 6)  # no float noise like 1.5000000000000002
@@ -64,7 +103,7 @@ class ValueSlider(QWidget):
         self.valueChanged.emit(self.value())
 
     def _update_label(self):
-        self.value_label.setText(self.fmt(self.value()))
+        self.value_label.setText(("AUTO \u00b7 " if self._auto else "") + self.fmt(self.value()))
 
 
 def pct(v: float) -> str:
@@ -94,25 +133,62 @@ class SettingsPanel(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(14)
 
+        head = QHBoxLayout()
+        head.setSpacing(8)
         sec = QLabel("PRESET")
         sec.setProperty("role", "section")
-        lay.addWidget(sec)
+        head.addWidget(sec)
+        head.addStretch(1)
+        self.modified_tag = QLabel("MODIFIED")
+        self.modified_tag.setProperty("role", "tag")
+        head.addWidget(self.modified_tag)
+        self.reset_link = QToolButton()
+        self.reset_link.setText("Reset")
+        self.reset_link.setProperty("role", "link")
+        self.reset_link.setCursor(Qt.PointingHandCursor)
+        self.reset_link.setToolTip("Return every control to the preset's values")
+        self.reset_link.clicked.connect(self.reset_to_preset)
+        head.addWidget(self.reset_link)
+        lay.addLayout(head)
+
+        row = QHBoxLayout()
+        row.setSpacing(6)
         self.preset = QComboBox()
-        self.preset.addItems(list(PRESETS))
-        self.preset.setCurrentText(initial.preset if initial.preset in PRESETS else "Clean Voice")
-        self.preset.currentTextChanged.connect(self._preset_changed)
-        lay.addWidget(self.preset)
+        self.preset.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.preset.setMinimumContentsLength(8)
+        self.preset.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.preset.currentTextChanged.connect(self._preset_selected)
+        row.addWidget(self.preset, 1)
+        self.save_preset_btn = QPushButton("Save as\u2026")
+        self.save_preset_btn.setToolTip("Save the current settings as your own preset")
+        self.save_preset_btn.clicked.connect(self.save_preset_as)
+        row.addWidget(self.save_preset_btn)
+        self.preset_menu_btn = QToolButton()
+        self.preset_menu_btn.setText("\u22ef")
+        self.preset_menu_btn.setProperty("role", "menu")
+        self.preset_menu_btn.setToolTip("Manage presets")
+        self.preset_menu_btn.setPopupMode(QToolButton.InstantPopup)
+        self.preset_menu = QMenu(self)
+        self.preset_menu.aboutToShow.connect(self._fill_preset_menu)
+        self.preset_menu_btn.setMenu(self.preset_menu)
+        row.addWidget(self.preset_menu_btn)
+        lay.addLayout(row)
         self.preset_desc = QLabel()
         self.preset_desc.setWordWrap(True)
         self.preset_desc.setProperty("role", "faint")
         lay.addWidget(self.preset_desc)
 
-        self.smart = QCheckBox("Adapt to this recording")
+        self.smart = QCheckBox("Smart settings: adapt to each recording")
         self.smart.setChecked(smart)
-        self.smart.setToolTip("Analyzes the recording and adjusts the preset: more cleanup for noisy files,\n"
-                              "less for clean ones, room reduction when there is reverb, hum filter when needed.")
-        self.smart.toggled.connect(lambda _: self._preset_changed(self.preset.currentText()))
+        self.smart.setToolTip("Analyzes each recording and sets the cleanup amounts for it: more for noisy files,\n"
+                              "less for clean ones, room reduction when there is reverb, hum filter when needed.\n"
+                              "While on, the controls it sets are locked and marked AUTO.")
+        self.smart.toggled.connect(self._smart_toggled)
         lay.addWidget(self.smart)
+        self.smart_note = QLabel()
+        self.smart_note.setWordWrap(True)
+        self.smart_note.setProperty("role", "smartnote")
+        lay.addWidget(self.smart_note)
 
         lay.addWidget(_divider())
 
@@ -122,8 +198,10 @@ class SettingsPanel(QWidget):
                                   tooltip="Improves clarity: balances the tone of the voice and brings out presence.")
         self.room = ValueSlider("Room / Echo Reduction", 0, 1, 0.01, pct, large=True,
                                 tooltip="Reduces the sound of the room (reverb) and echoes.")
-        for s in (self.noise, self.speech, self.room):
+        for key, s in (("noise_reduction", self.noise), ("speech_enhancement", self.speech),
+                       ("room_reduction", self.room)):
             s.valueChanged.connect(self._simple_changed)
+            s.resetRequested.connect(lambda k=key, w=s: w.set_value(getattr(self._reference(), k), emit=True))
             lay.addWidget(s)
 
         lay.addWidget(_divider())
@@ -149,8 +227,10 @@ class SettingsPanel(QWidget):
         lay.addWidget(self.advanced)
         lay.addStretch(1)
 
+        self._populate_presets(initial.preset)
         self.set_settings(initial)
         self._update_preset_desc()
+        self._sync_smart_ui()
         if advanced_open:
             self.adv_button.setChecked(True)
 
@@ -170,6 +250,7 @@ class SettingsPanel(QWidget):
     def _adv(self, layout, key: str, label: str, lo, hi, step, fmt, tip=""):
         w = ValueSlider(label, lo, hi, step, fmt, tooltip=tip)
         w.valueChanged.connect(lambda v, k=key: self._advanced_changed(k, v))
+        w.resetRequested.connect(lambda k=key, w=w: w.set_value(float(getattr(self._reference(), k)), emit=True))
         layout.addWidget(w)
         self._advanced[key] = w
         return w
@@ -216,8 +297,8 @@ class SettingsPanel(QWidget):
         self.detected.setWordWrap(True)
         self.detected.setProperty("role", "faint")
         g.addWidget(self.detected)
-        reset = QPushButton("Reset to automatic settings")
-        reset.clicked.connect(lambda: self._preset_changed(self.preset.currentText()))
+        reset = QPushButton("Reset to preset")
+        reset.clicked.connect(self.reset_to_preset)
         g.addWidget(reset)
 
     # --- re-synthesis / tone / dynamics sections -------------------------------------
@@ -330,6 +411,7 @@ class SettingsPanel(QWidget):
     def _eq_changed(self, gains: list):
         self.settings = self.settings.copy(eq_gains=list(gains))
         self._update_eq_curve()
+        self._update_modified()
         self.settingsChanged.emit(self.current())
 
     def _reset_eq(self):
@@ -364,8 +446,11 @@ class SettingsPanel(QWidget):
 
     # --- state ---------------------------------------------------------------------------
     def set_analysis(self, analysis: AnalysisResult | None):
+        """A recording was loaded (or closed). Smart on: it sets its controls for this
+        recording. Smart off: the user's settings stay exactly as they are."""
         self.analysis = analysis
-        self._preset_changed(self.preset.currentText())
+        self._apply_smart()
+        self._after_change()
         if analysis is not None:
             bits = []
             hp = choose_highpass(self.settings.lf_cleanup, analysis.lf_rumble_db, analysis.f0_low_hz)
@@ -395,6 +480,7 @@ class SettingsPanel(QWidget):
         self.graphic_eq.set_values(list(s.eq_gains))
         self._sync_pause_controls()
         self._update_eq_curve()
+        self._update_modified()
 
     def current(self) -> ProcessingSettings:
         return self.settings.copy()
@@ -404,26 +490,174 @@ class SettingsPanel(QWidget):
         if not available:
             self.use_ai.setToolTip("The AI model is not available. Traditional noise reduction is used.")
 
+    # --- presets ---------------------------------------------------------------------------
+    def _populate_presets(self, select: str):
+        self.preset.blockSignals(True)
+        self.preset.clear()
+        self.preset.addItems(list(PRESETS))
+        mine = [n for n in preset_names() if n not in PRESETS]
+        if mine:
+            self.preset.insertSeparator(self.preset.count())
+            self.preset.addItems(sorted(mine, key=str.lower))
+        self.preset.setCurrentText(select if select in preset_names() else DEFAULT_PRESET)
+        self.preset.blockSignals(False)
+
+    def _preset_selected(self, name: str):
+        if name:
+            self._preset_changed(name)
+
     def _preset_changed(self, name: str):
-        base = self.settings.copy(preset=name)
+        """Apply preset ``name`` completely (then Smart, if on, for the loaded recording)."""
+        self.settings = preset_reference(name, self.settings)
+        self._apply_smart()
+        self._after_change()
+
+    def reset_to_preset(self):
+        self._preset_changed(self.preset.currentText())
+
+    def _apply_smart(self):
         if self.smart.isChecked() and self.analysis is not None:
-            dec = auto_configure(name, self.analysis, base)
-            s, self.auto_notes = dec.settings, dec.notes
+            dec = smart_adapt(self.settings, self.analysis)
+            self.settings, self.auto_notes = dec.settings, dec.notes
         else:
-            s, self.auto_notes = from_preset(name, base), []
-        # loudness preferences are the user's, not the preset's
-        s.target_lufs, s.peak_ceiling_dbtp = self.settings.target_lufs, self.settings.peak_ceiling_dbtp
-        s.normalize_loudness, s.use_ai = self.settings.normalize_loudness, self.settings.use_ai
-        s.eq_gains, s.eq_tilt = list(self.settings.eq_gains), self.settings.eq_tilt  # the user's EQ is not a preset
-        s.pause_shorten, s.pause_min_s, s.pause_keep_ms = (self.settings.pause_shorten, self.settings.pause_min_s,
-                                                           self.settings.pause_keep_ms)
-        self.set_settings(s)
+            self.auto_notes = []
+
+    def _after_change(self):
+        self.set_settings(self.settings)
         self._update_preset_desc()
+        self._sync_smart_ui()
         self.settingsChanged.emit(self.current())
 
+    def _reference(self) -> ProcessingSettings:
+        """What the current preset gives right now (with Smart, for the loaded recording)."""
+        ref = preset_reference(self.settings.preset, self.settings)
+        if self.smart.isChecked() and self.analysis is not None:
+            ref = smart_adapt(ref, self.analysis).settings
+        return ref
+
+    def modified(self) -> list[str]:
+        return modified_fields(self.settings, self._reference(), self.smart.isChecked())
+
+    def _update_modified(self):
+        if not hasattr(self, "modified_tag"):
+            return
+        changed = self.modified()
+        self.modified_tag.setVisible(bool(changed))
+        self.reset_link.setVisible(bool(changed))
+        if changed:
+            self.modified_tag.setToolTip(f"{len(changed)} control{'s' if len(changed) != 1 else ''} differ "
+                                         f"from the preset \u201c{self.settings.preset}\u201d.")
+
+    def _smart_toggled(self, on: bool):
+        # on: Smart takes over its controls for the loaded recording; off: values stay, unlocked
+        self._apply_smart()
+        self._after_change()
+
+    def _sync_smart_ui(self):
+        on = self.smart.isChecked()
+        for w in (self.noise, self.speech, self.room):
+            w.set_auto(on)
+        for key, w in self._advanced.items():
+            if key in SMART_FIELDS:
+                w.set_auto(on)
+        self.smart_note.setVisible(on)
+        if on:
+            when = "this recording" if self.analysis is not None else "each recording when it is loaded"
+            self.smart_note.setText(
+                f"<b>Smart is on.</b> Noise, Speech and Room (and the controls tied to them, marked "
+                f"<span style='color:{theme.ACCENT}'>AUTO</span>) are set for {when}. "
+                "Turn Smart off to adjust them yourself.")
+
     def _update_preset_desc(self):
-        p = PRESETS.get(self.preset.currentText())
-        self.preset_desc.setText(p.description if p else "")
+        name = self.preset.currentText()
+        p = PRESETS.get(name)
+        self.preset_desc.setText(p.description if p else "Your own preset." if is_user_preset(name) else "")
+
+    def _fill_preset_menu(self):
+        m = self.preset_menu
+        m.clear()
+        name = self.preset.currentText()
+        m.addAction("Save as New Preset\u2026", self.save_preset_as)
+        if is_user_preset(name):
+            a = m.addAction(f"Update \u201c{name}\u201d", self.update_preset)
+            a.setEnabled(bool(self.modified()))
+            m.addAction(f"Rename \u201c{name}\u201d\u2026", self.rename_preset)
+            m.addAction(f"Delete \u201c{name}\u201d\u2026", self.delete_preset)
+        m.addSeparator()
+        a = m.addAction("Reset to Preset", self.reset_to_preset)
+        a.setEnabled(bool(self.modified()))
+        m.addAction(f"Show Presets in {FILE_MANAGER}", lambda: open_folder(user_presets.presets_dir()))
+
+    def _settings_to_save(self) -> ProcessingSettings:
+        s = self.current()
+        if self.smart.isChecked():
+            # the values Smart chose for this recording are not the preset's: keep the preset's own
+            ref = preset_reference(s.preset, s)
+            s = s.copy(**{k: getattr(ref, k) for k in SMART_FIELDS})
+        return s
+
+    def _ask_name(self, title: str, label: str, text: str = "") -> str | None:
+        name, ok = QInputDialog.getText(self, title, label, QLineEdit.Normal, text)
+        return name if ok else None
+
+    def save_preset_as(self):
+        cur = self.preset.currentText()
+        name = self._ask_name("Save as Preset",
+                              f"Name for the new preset (up to {user_presets.MAX_NAME} characters):",
+                              cur if is_user_preset(cur) else "")
+        if name is None:
+            return
+        try:
+            clean = user_presets.validate_name(name)
+            existing = user_presets.find(clean)
+            if existing and QMessageBox.question(
+                    self, "Replace Preset", f"A preset called \u201c{existing}\u201d already exists. Replace it?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+                return
+            saved = user_presets.save(clean, self._settings_to_save())
+        except user_presets.PresetError as exc:
+            QMessageBox.warning(self, exc.title, exc.user_message)
+            return
+        self._select_saved(saved)
+
+    def update_preset(self):
+        try:
+            self._select_saved(user_presets.save(self.preset.currentText(), self._settings_to_save()))
+        except user_presets.PresetError as exc:
+            QMessageBox.warning(self, exc.title, exc.user_message)
+
+    def rename_preset(self):
+        old = self.preset.currentText()
+        name = self._ask_name("Rename Preset", "New name:", old)
+        if name is None or name == old:
+            return
+        try:
+            self._select_saved(user_presets.rename(old, name))
+        except user_presets.PresetError as exc:
+            QMessageBox.warning(self, exc.title, exc.user_message)
+
+    def delete_preset(self):
+        name = self.preset.currentText()
+        if QMessageBox.question(self, "Delete Preset", f"Delete the preset \u201c{name}\u201d?\n"
+                                "Your current settings stay as they are.",
+                                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        try:
+            user_presets.delete(name)
+        except user_presets.PresetError as exc:
+            QMessageBox.warning(self, exc.title, exc.user_message)
+            return
+        # keep the sound; it just no longer has a preset of its own
+        self.settings = self.settings.copy(preset=DEFAULT_PRESET)
+        self._populate_presets(DEFAULT_PRESET)
+        self._after_change()
+
+    def _select_saved(self, name: str):
+        """After saving, the current settings are this preset (nothing changes audibly)."""
+        self.settings = self.settings.copy(preset=name)
+        self._apply_smart()
+        self._populate_presets(name)
+        self._after_change()
 
     def _simple_changed(self, _):
         s = apply_simple(self.settings, self.noise.value(), self.speech.value(), self.room.value())
@@ -440,6 +674,7 @@ class SettingsPanel(QWidget):
             mirror[key].set_value(float(value))
             if key == "reverb_reduction":
                 self.settings = self.settings.copy(room_reduction=float(value))
+        self._update_modified()
         self.settingsChanged.emit(self.current())
 
 

@@ -125,8 +125,19 @@ The guiding rule is *better speech, not obviously processed speech*.
 ## Using it
 
 * **Simple controls:** a preset plus three sliders (Noise Reduction, Speech Enhancement,
-  Room/Echo Reduction). With *Adapt to this recording* on, analysis tunes the preset:
-  clean recordings get light processing, noisy ones get more.
+  Room/Echo Reduction). Every control is remembered between sessions.
+* **Smart settings** (*Smart settings: adapt to each recording*, on by default): analysis
+  sets Noise, Speech and Room, and the controls tied to them, for each recording. Clean
+  recordings get light processing and noisy ones get more. While Smart is on, those
+  controls are locked and marked **AUTO**, and a note explains why. Turn Smart off to set
+  them yourself; your values then stay as they are when you open another recording.
+  Everything else (re-synthesis, leveling, EQ, ...) is always yours.
+* **Presets:** *Save as…* stores all current settings as your own preset (the `⋯` menu
+  next to it updates, renames or deletes it, or shows the presets folder). Presets are
+  JSON files in `%APPDATA%\VoiceCleaner\presets` (macOS:
+  `~/Library/Application Support/VoiceCleaner/presets`), easy to back up or share.
+  **MODIFIED** appears when you change a control; *Reset* goes back to the preset.
+  Double-click any slider to reset just that one.
 * **Voice Re-synthesis:** set the amount (off by default). The model (490 MB) can be
   downloaded from inside the app the first time.
 * **EQ & Tone:** a live response curve, *Tonal balancing* (automatic correction
@@ -145,6 +156,10 @@ The guiding rule is *better speech, not obviously processed speech*.
 * **Shortcuts:** `Space` play/pause, `A`/`B` switch, `Home` to start, `Ctrl+O` open,
   `Ctrl+Enter` enhance, `Ctrl+E` export, `R` record/stop, `Ctrl+Shift+N` new session,
   `Esc` cancel. `Space` plays whichever tab is in front (Enhance or Playback). `Ctrl+wheel` zooms the waveform.
+  The menu's *Keyboard Shortcuts* (`Ctrl+/`) lists them all.
+* **Open Recent** (app menu): the last ten recordings you opened.
+* **Export:** tick *Show the file in Explorer when done* to go straight to the exported
+  file instead of the confirmation box; the choice is remembered.
 * **Record:** click **● Record** on the Original track (or *Record Audio* on the start
   screen, or press `R`). Pick a microphone (USB, headset, line-in) and/or **desktop
   audio**: anything playing through a chosen speaker or headphone output, captured via

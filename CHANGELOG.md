@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.4
+
+- **Sharper Steamburger logo and app icon:** the logo is now true vector artwork, so it stays
+  crisp at every size instead of looking ragged when small.
+- The Windows icon now includes every size the taskbar, Explorer and shortcuts use (16-256 px),
+  each drawn from the vector, instead of one large image that Windows had to shrink.
+- On displays scaled above 100 %, the logos in the app are drawn at full resolution instead
+  of being enlarged.
+
 ## 1.0.3
 
 - **Settings are remembered:** every control, not just a few, is restored at the next start.

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, QSize, Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QPushButton, QVBoxLayout)
@@ -18,25 +18,33 @@ ELLIPSIS = "…"
 _renderer: QSvgRenderer | None = None
 
 
-def logo_pixmap(size: int) -> QPixmap:
-    """The Steamburger burger mark (black with a white outline: reads on day and night)."""
+def logo_pixmap(size: int, dpr: float | None = None) -> QPixmap:
+    """The Steamburger burger mark (black with a white outline: reads on day and night),
+    drawn from the vector logo. ``size`` is in logical pixels; by default it is rendered
+    at the screen's scale (e.g. 150 %) so it stays sharp. Pass ``dpr=1`` for exact pixel
+    sizes (icon files, installer art)."""
     global _renderer
     if _renderer is None:
         _renderer = QSvgRenderer(str(LOGO))
-    pm = QPixmap(size, size)
+    if dpr is None:
+        app = QGuiApplication.instance()
+        dpr = max((s.devicePixelRatio() for s in app.screens()), default=1.0) if app else 1.0
+    px = max(1, round(size * dpr))
+    pm = QPixmap(px, px)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
     p.setRenderHint(QPainter.SmoothPixmapTransform)
-    _renderer.render(p, QRectF(0, 0, size, size))
+    _renderer.render(p, QRectF(0, 0, px, px))
     p.end()
+    pm.setDevicePixelRatio(px / size)
     return pm
 
 
 def app_icon() -> QIcon:
     icon = QIcon()
     for s in (16, 24, 32, 48, 64, 128, 256):
-        icon.addPixmap(logo_pixmap(s))
+        icon.addPixmap(logo_pixmap(s, dpr=1))
     return icon
 
 

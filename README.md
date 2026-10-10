@@ -335,12 +335,13 @@ this computer (macOS DMG, Windows installer, or the GPU web installer); it opens
 browser and installs like any other version. Nothing is downloaded or installed
 automatically, and nothing about you, your computer or your audio is sent.
 
-By default the app also checks automatically once a day, a few seconds after starting,
-and only speaks up when there is something new. Turn this off with the checkbox in the
-update window. *Skip Version* hides that version from automatic checks. To check from a
-terminal (useful for diagnosing network problems): `VoiceCleaner --check-updates`. Set
-`VOICECLEANER_NO_UPDATE_CHECK=1` to disable automatic checks entirely, for example on
-managed computers.
+By default the app also checks automatically every time it starts (one small request,
+a few seconds after starting) and only speaks up when there is something new. *Later*
+hides that version until the next day, *Skip Version* hides it for good, and a newer
+release is shown right away. Turn automatic checks off with the checkbox in the update
+window. To check from a terminal (useful for diagnosing network problems):
+`VoiceCleaner --check-updates`. Set `VOICECLEANER_NO_UPDATE_CHECK=1` to disable automatic
+checks entirely, for example on managed computers.
 
 ## Known limitations
 

@@ -103,7 +103,7 @@ class UpdateDialog(QDialog):
         h.setWordWrap(True)
         v.addWidget(h)
 
-        self.auto_box = QCheckBox("Check for updates automatically (once a day)")
+        self.auto_box = QCheckBox("Check for updates when VoiceCleaner starts")
         self.auto_box.setChecked(auto_check)
         v.addWidget(self.auto_box)
 

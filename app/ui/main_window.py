@@ -1226,8 +1226,9 @@ class MainWindow(QMainWindow):
         return bool(self.config.extra.get("update_auto", True)) and not os.environ.get("VOICECLEANER_NO_UPDATE_CHECK")
 
     def _auto_check_updates(self):
-        last = float(self.config.extra.get("update_last_check", 0) or 0)
-        if self._auto_updates_enabled() and updates.due_for_auto_check(last):
+        """Every start: one small request. Whether a found update is shown is decided by
+        Skip/Later in _update_found, never by when the last check happened."""
+        if self._auto_updates_enabled():
             self.check_for_updates(manual=False)
 
     def check_for_updates(self, manual: bool = True):
@@ -1249,7 +1250,8 @@ class MainWindow(QMainWindow):
 
     def _update_found(self, release, manual: bool):
         self._update_checked()
-        if not manual and self.config.extra.get("update_skip") == release.version:
+        if not manual and (self.config.extra.get("update_skip") == release.version
+                           or updates.is_snoozed(self.config.extra.get("update_snooze"), release.version)):
             return
         dlg = UpdateDialog(release, bool(self.config.extra.get("update_auto", True)), self)
 
@@ -1257,6 +1259,8 @@ class MainWindow(QMainWindow):
             self.config.extra["update_auto"] = dlg.auto_box.isChecked()
             if code == UpdateDialog.SKIP:
                 self.config.extra["update_skip"] = release.version
+            else:  # Later, Download or closed: remind again tomorrow, not at every start
+                self.config.extra["update_snooze"] = updates.snooze(release.version)
             try:
                 self.config.save()
             except OSError:

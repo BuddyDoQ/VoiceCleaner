@@ -21,7 +21,7 @@ from .config import APP_NAME, APP_VERSION, edition
 REPO = "BuddyDoQ/VoiceCleaner"
 LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases"
-AUTO_CHECK_INTERVAL_S = 24 * 3600
+REMIND_LATER_S = 24 * 3600  # "Later" hides that version from automatic checks this long
 TIMEOUT_S = 10
 
 
@@ -117,9 +117,23 @@ def pick_asset(release: ReleaseInfo, plat: str | None = None, arch: str | None =
     return None
 
 
-def due_for_auto_check(last_check: float, now: float | None = None) -> bool:
+def snooze(version: str, now: float | None = None) -> dict:
+    """The stored reminder state after the user chose "Later" for ``version``."""
     now = time.time() if now is None else now
-    return not (0 < now - last_check < AUTO_CHECK_INTERVAL_S)
+    return {"version": version, "until": now + REMIND_LATER_S}
+
+
+def is_snoozed(state, version: str, now: float | None = None) -> bool:
+    """True while ``version`` is postponed by "Later". A newer release, or a clock moved
+    back past the snooze start, ends it."""
+    if not isinstance(state, dict) or state.get("version") != version:
+        return False
+    now = time.time() if now is None else now
+    try:
+        until = float(state.get("until", 0))
+    except (TypeError, ValueError):
+        return False
+    return 0 < until - now <= REMIND_LATER_S
 
 
 def whats_new(notes: str, max_chars: int = 4000) -> str:

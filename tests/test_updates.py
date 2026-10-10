@@ -52,13 +52,19 @@ def test_pick_asset_mac_falls_back_to_zip():
     assert a.name.endswith(".zip")
 
 
-def test_due_for_auto_check():
-    day = updates.AUTO_CHECK_INTERVAL_S
-    assert updates.due_for_auto_check(0, now=1_000_000)  # never checked
-    assert not updates.due_for_auto_check(1_000_000, now=1_000_000 + day - 1)
-    assert updates.due_for_auto_check(1_000_000, now=1_000_000 + day + 1)
-    assert updates.due_for_auto_check(1_000_000 + 5 * day, now=1_000_000)  # clock moved back: check again
+def test_later_snoozes_that_version_for_a_day():
+    day = updates.REMIND_LATER_S
+    st = updates.snooze("1.2.0", now=1_000_000)
+    assert updates.is_snoozed(st, "1.2.0", now=1_000_000 + 60)
+    assert updates.is_snoozed(st, "1.2.0", now=1_000_000 + day - 1)
+    assert not updates.is_snoozed(st, "1.2.0", now=1_000_000 + day + 1)  # reminded again after a day
+    assert not updates.is_snoozed(st, "1.3.0", now=1_000_000 + 60)  # a newer release is shown at once
+    assert not updates.is_snoozed(st, "1.2.0", now=1_000_000 - 10 * day)  # clock moved back: show it
 
+
+@pytest.mark.parametrize("state", [None, {}, "1.2.0", {"version": "1.2.0"}, {"version": "1.2.0", "until": "x"}])
+def test_snooze_ignores_missing_or_corrupt_state(state):
+    assert not updates.is_snoozed(state, "1.2.0", now=1_000_000)
 
 def test_whats_new_takes_only_that_section():
     body = ("## VoiceCleaner 1.2.0\r\n\r\n### What's new in 1.2.0\r\n\r\n- Faster export.\r\n- New tab.\r\n\r\n"

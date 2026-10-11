@@ -28,11 +28,19 @@ def open_folder(path: Path) -> None:
         subprocess.Popen(["xdg-open", str(path)])
 
 
+# Redo is Ctrl+Y on Windows; macOS has no Cmd+Y redo, its standard is Shift+Cmd+Z
+# (both are bound in the main window through QKeySequence.Redo and Ctrl+Shift+Z).
+REDO_KEYS = "Ctrl+Shift+Z" if sys.platform == "darwin" else "Ctrl+Y"
+
+
 def shortcut_text(keys: str) -> str:
     """A shortcut as written on this platform: ``Ctrl+Shift+N`` stays as is on Windows and
-    becomes ``⇧⌘N`` on macOS, where Qt maps Ctrl to the Command key."""
+    becomes ``⇧⌘N`` on macOS, where Qt maps Ctrl to the Command key. Alternatives separated
+    by `` / `` are converted one by one."""
     if sys.platform != "darwin":
         return keys
+    if " / " in keys:
+        return " / ".join(shortcut_text(k) for k in keys.split(" / "))
     parts = keys.split("+")
     mods, key = parts[:-1], parts[-1]
     if key == "mouse wheel":

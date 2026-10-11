@@ -17,7 +17,7 @@ from ..audio.eq import VoiceEQParams, choose_highpass, manual_bands
 from ..audio.settings import (DEFAULT_PRESET, PRESETS, SMART_FIELDS, ProcessingSettings, apply_simple,
                               is_user_preset, modified_fields, preset_names, preset_reference, smart_adapt)
 from ..utils import user_presets
-from ..utils.shell import FILE_MANAGER, open_folder
+from ..utils.shell import FILE_MANAGER, REDO_KEYS, open_folder, shortcut_text
 from . import theme
 from .tone_widgets import CollapsibleSection, EQCurve, GraphicEQ
 
@@ -621,8 +621,8 @@ class SettingsPanel(QWidget):
             return
         self.undo_btn.setEnabled(self.can_undo())
         self.redo_btn.setEnabled(self.can_redo())
-        self.undo_btn.setToolTip(f"{self.undo_text()} (Ctrl+Z)")
-        self.redo_btn.setToolTip(f"{self.redo_text()} (Ctrl+Y)")
+        self.undo_btn.setToolTip(f"{self.undo_text()} ({shortcut_text('Ctrl+Z')})")
+        self.redo_btn.setToolTip(f"{self.redo_text()} ({shortcut_text(REDO_KEYS)})")
         self.historyChanged.emit()
 
     def _populate_presets(self, select: str):

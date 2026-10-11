@@ -28,7 +28,7 @@ from ..export.wav_exporter import ExportOptions, export_wav
 from ..utils import updates, user_presets
 from ..utils.config import APP_NAME, APP_VERSION, UserConfig, edition, log_dir, models_dir, user_models_dir
 from ..utils.logging import get_logger
-from ..utils.shell import reveal, shortcut_text
+from ..utils.shell import REDO_KEYS, reveal, shortcut_text
 from ..workers.batch_worker import BatchOptions, start_batch
 from ..workers.processing_worker import TaskHandle, run_task
 from . import theme
@@ -65,7 +65,7 @@ SHORTCUTS = [
     ("R", "Record / stop recording"),
     ("L", "Loop the selection (or the whole recording)"),
     ("Ctrl+Shift+N", "New session"),
-    ("Ctrl+Z / Ctrl+Y", "Undo / redo a settings change"),
+    ("Ctrl+Z / " + REDO_KEYS, "Undo / redo a settings change"),
     ("Esc", "Cancel"),
     ("Ctrl+/", "This list"),
     ("Ctrl+mouse wheel", "Zoom the waveform"),
@@ -601,7 +601,11 @@ class MainWindow(QMainWindow):
         sc(Qt.Key_R, self._record_shortcut)
         sc(QKeySequence.Undo, self._undo_shortcut)
         sc(QKeySequence.Redo, self._redo_shortcut)
-        sc("Ctrl+Shift+Z", self._redo_shortcut)
+        # A standard-key shortcut uses only the platform's first binding (Ctrl+Y on Windows), so
+        # add Ctrl+Shift+Z too. On macOS Shift+Cmd+Z already IS that first binding; binding it
+        # twice makes the shortcut ambiguous and neither one fires.
+        if QKeySequence(QKeySequence.Redo) != QKeySequence("Ctrl+Shift+Z"):
+            sc("Ctrl+Shift+Z", self._redo_shortcut)
         sc(Qt.Key_L, lambda: self.audio is not None and self.loop_btn.toggle())
 
     # ============================================================================ state

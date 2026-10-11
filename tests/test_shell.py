@@ -13,3 +13,10 @@ def test_shortcut_text(monkeypatch, keys, mac):
     assert shell.shortcut_text(keys) == mac
     monkeypatch.setattr(shell.sys, "platform", "win32")
     assert shell.shortcut_text(keys) == keys  # Windows text is unchanged
+
+
+def test_alternatives_and_redo(monkeypatch):
+    monkeypatch.setattr(shell.sys, "platform", "darwin")
+    assert shell.shortcut_text("Ctrl+Z / Ctrl+Shift+Z") == "⌘Z / ⇧⌘Z"
+    monkeypatch.setattr(shell.sys, "platform", "win32")
+    assert shell.shortcut_text("Ctrl+Z / Ctrl+Y") == "Ctrl+Z / Ctrl+Y"

@@ -40,6 +40,7 @@ NIGHT = {
     "RECORD": "#ff5a5f",
     "WAVE_ORIGINAL": "#a78bfa",
     "WAVE_ENHANCED": "#60a5fa",
+    "PLAYHEAD": "#ffffff",  # playhead on the waveform being heard
 }
 DAY = {
     "BG": "#f2f2f5",
@@ -62,12 +63,13 @@ DAY = {
     "RECORD": "#e5383b",
     "WAVE_ORIGINAL": "#8b5cf6",
     "WAVE_ENHANCED": "#3b82f6",
+    "PLAYHEAD": "#0a0a12",  # dark on the light background (white was invisible)
 }
 
 # current values (night by default); replaced by apply()
 BG = BG_ALT = SURFACE = SURFACE_2 = SURFACE_3 = BORDER = BORDER_STRONG = ""
 TEXT = MUTED = FAINT = ACCENT = ACCENT_DARK = ACCENT_TEXT = ORIGINAL = ""
-WARNING = ERROR = SUCCESS = RECORD = WAVE_ORIGINAL = WAVE_ENHANCED = ""
+WARNING = ERROR = SUCCESS = RECORD = WAVE_ORIGINAL = WAVE_ENHANCED = PLAYHEAD = ""
 MODE = "night"
 STYLESHEET = ""
 

@@ -294,7 +294,7 @@ class WaveformView(QWidget):
         # playhead
         if self.t0 <= self.playhead <= self.t1:
             x = self._t_to_x(self.playhead)
-            p.setPen(QPen(QColor("#ffffff") if self.active else theme.qcolor(theme.MUTED), 1.5))
+            p.setPen(QPen(theme.qcolor(theme.PLAYHEAD) if self.active else theme.qcolor(theme.MUTED), 1.5))
             p.drawLine(QPointF(x, r.top() - 4), QPointF(x, r.bottom() + 2))
 
         # hover time

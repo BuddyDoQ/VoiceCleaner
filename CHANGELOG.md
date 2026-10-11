@@ -9,6 +9,8 @@
     GPU off. If the GPU ever fails, that part is redone on the CPU automatically.
 - **Mac: live preview is on by default on Apple Silicon** (under half a second per preview,
   about 5 s with Voice Re-synthesis).
+- **Fixed:** in light mode the playhead on the track being played was white, so it could not be
+  seen. It is now dark in light mode (still white in dark mode).
 
 ## 1.0.7
 

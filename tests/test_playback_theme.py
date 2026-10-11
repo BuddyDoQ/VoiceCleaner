@@ -62,3 +62,22 @@ def test_batch_export_uses_session_name(tmp_path, speech):
     out, _ = enhance_file(src, opts, None, TaskContext(lambda f, m: None))
     assert out.parent == s.exports_dir
     assert out.name == "Show 7 - guest call enhanced.wav"
+
+
+def _contrast(a: str, b: str) -> float:
+    """WCAG contrast ratio between two #rrggbb colours."""
+    def lum(h):
+        c = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def test_playhead_stands_out_in_both_themes():
+    """The playhead of the track being heard was white in light mode, invisible on white."""
+    from app.ui import theme
+
+    for palette in (theme.DAY, theme.NIGHT):
+        for bg in (palette["SURFACE"], palette["BG"]):
+            assert _contrast(palette["PLAYHEAD"], bg) >= 4.5, (palette["PLAYHEAD"], bg)

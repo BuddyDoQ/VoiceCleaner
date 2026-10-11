@@ -12,6 +12,9 @@ the global stylesheet, so switching day/night restyles everything at once.
 """
 from __future__ import annotations
 
+import os
+import re
+import sys
 from pathlib import Path
 
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
@@ -106,6 +109,31 @@ def _set(values: dict) -> None:
 _set(NIGHT)
 
 
+# macOS draws a point as 1 px (72 dpi), Windows as 1.33 px (96 dpi), so the same point sizes
+# came out a quarter smaller on a Mac. Scale them there to match the Windows look.
+MAC_FONT_FIX = sys.platform == "darwin"
+PT_SCALE = 96 / 72 if MAC_FONT_FIX else 1.0
+
+
+def pt(size: float) -> float:
+    """A font size in points, as it looks on Windows, for this platform."""
+    return round(size * PT_SCALE, 2)
+
+
+def _scale_pt(css: str) -> str:
+    if PT_SCALE == 1.0:
+        return css
+    return re.sub(r"(?<![\w.])(\d+(?:\.\d+)?)pt\b", lambda m: f"{pt(float(m.group(1)))}pt", css)
+
+
+# Widget classes macOS gives their own system font (13 pt San Francisco), which override
+# the application font: without this, labels, buttons and menus ignored the brand font.
+_PLATFORM_FONT_CLASSES = ("QLabel", "QPushButton", "QToolButton", "QCheckBox", "QRadioButton", "QMenu",
+                          "QMenuBar", "QMessageBox", "QMessageBoxLabel", "QTipLabel", "QHeaderView",
+                          "QListView", "QListWidget", "QTreeView", "QTableView", "QTabBar", "QGroupBox",
+                          "QComboBoxMenuItem", "QAbstractItemView", "QSpinBox", "QDoubleSpinBox")
+
+
 def qcolor(hex_value: str, alpha: int = 255) -> QColor:
     c = QColor(hex_value)
     c.setAlpha(alpha)
@@ -115,21 +143,21 @@ def qcolor(hex_value: str, alpha: int = 255) -> QColor:
 def app_font() -> QFont:
     load_fonts()
     font = QFont(FONT_UI)
-    font.setPointSizeF(9.5)
+    font.setPointSizeF(pt(9.5))
     return font
 
 
 def mono_font(size: float = 9.0) -> QFont:
     load_fonts()
     f = QFont(FONT_MONO)
-    f.setPointSizeF(size)
+    f.setPointSizeF(pt(size))
     return f
 
 
 def display_font(size: float = 20.0) -> QFont:
     load_fonts()
     f = QFont(FONT_DISPLAY)
-    f.setPointSizeF(size)
+    f.setPointSizeF(pt(size))
     return f
 
 
@@ -157,7 +185,7 @@ def palette() -> QPalette:
 def build_stylesheet() -> str:
     mono = f"'{FONT_MONO}', Consolas, monospace"
     disp = f"'{FONT_DISPLAY}', Impact, sans-serif"
-    return f"""
+    return _scale_pt(f"""
 QWidget {{ color: {TEXT}; }}
 QMainWindow, QDialog {{ background: {BG}; }}
 QToolTip {{ background: {SURFACE}; color: {TEXT}; border: 1px solid {BORDER_STRONG}; padding: 6px; border-radius: 4px; }}
@@ -183,8 +211,6 @@ QLabel[role="brand"] {{ font-family: {disp}; font-size: 19pt; letter-spacing: 1p
 QLabel[role="brandsub"] {{ font-family: {mono}; font-size: 7.5pt; color: {FAINT}; letter-spacing: 2px; }}
 QLabel[role="eqvalue"] {{ color: {FAINT}; font-family: {mono}; font-size: 7.5pt; }}
 QLabel[role="eqvalue"][active="true"] {{ color: {ACCENT}; }}
-QLabel[role="eqfreq"] {{ color: {MUTED}; font-family: {mono}; font-size: 7.5pt; }}
-QLabel[role="eqname"] {{ color: {FAINT}; font-size: 7pt; }}
 QLabel[role="tag"] {{ font-family: {mono}; font-size: 7.5pt; letter-spacing: 1px; color: {WARNING}; }}
 QFrame[role="smartnote"] {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-left: 3px solid {ACCENT}; border-radius: 4px; }}
 QLabel[role="smartnotetext"] {{ background: transparent; border: none; color: {MUTED}; font-size: 8.5pt; }}
@@ -298,7 +324,7 @@ QMenu::item {{ padding: 6px 18px; border-radius: 3px; }}
 QMenu::item:selected {{ background: {SURFACE_3}; }}
 QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 8px; }}
 QMessageBox {{ background: {BG}; }}
-"""
+""")
 
 
 def resolve_mode(preference: str) -> str:
@@ -328,6 +354,9 @@ def apply(app, preference: str = "auto") -> str:
         app.setPalette(palette())
         app.setFont(app_font())
         app.setStyleSheet(STYLESHEET)
+        if MAC_FONT_FIX:  # after the stylesheet: setting it restores the macOS per-class fonts
+            for cls in _PLATFORM_FONT_CLASSES:
+                app.setFont(app_font(), cls)
         for w in app.allWidgets():
             w.update()  # custom-painted widgets pick up the new colours
     return MODE

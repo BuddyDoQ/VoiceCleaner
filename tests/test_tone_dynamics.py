@@ -140,3 +140,41 @@ def test_resynthesis_preserves_speech(speech, resynth_manager):
     _, p2 = signal.welch(y, SR, nperseg=2048)
     band = (f > 200) & (f < 6000)
     assert np.mean(np.abs(10 * np.log10(p1[band] / p2[band]))) < 3.0
+
+
+def test_eq_band_labels_fit_and_never_overlap():
+    """Each band's frequency and name are drawn in full, inside the EQ, without touching a
+    neighbour on the same line (names alternate between two lines). The offscreen platform
+    draws text about a third larger than a real screen, so this keeps a safety margin."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    import shiboken6
+    from PySide6.QtWidgets import QApplication
+
+    from app.ui import theme
+    from app.ui.tone_widgets import GraphicEQ, _BandLabels
+
+    app = QApplication.instance() or QApplication([])
+    theme.apply(app, "day")
+    eq = GraphicEQ()
+    try:
+        eq.resize(283, 220)
+        eq.show()
+        for _ in range(5):
+            app.processEvents()
+        for row in eq.findChildren(_BandLabels):
+            fm = row.fontMetrics()
+            boxes = []
+            for i, b in enumerate(row.bands):
+                cx = b.slider.mapTo(row.parentWidget(), b.slider.rect().center()).x() - row.x()
+                w = fm.horizontalAdvance(row.text_of(b)) + 2  # as drawn: text plus 1 px each side
+                x = min(max(0, cx - w / 2), row.width() - w)
+                assert 0 <= x and x + w <= row.width() + 0.5, (row.text_of(b), x, w, row.width())
+                boxes.append((i % row.lines, x + 1, x + w - 1))  # the text itself
+            for line in range(row.lines):
+                spans = sorted((a, z) for ln, a, z in boxes if ln == line)
+                for (a1, z1), (a2, _z2) in zip(spans, spans[1:]):
+                    assert z1 <= a2, f"labels overlap on line {line}: {spans}"
+    finally:
+        shiboken6.delete(eq)

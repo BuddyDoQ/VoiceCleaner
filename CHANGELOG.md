@@ -11,7 +11,15 @@
   about 5 s with Voice Re-synthesis).
 - **Fixed:** in light mode the playhead on the track being played was white, so it could not be
   seen. It is now dark in light mode (still white in dark mode).
-- **Fixed (Mac):** the start screen's description was cut off at the top and bottom.
+- **Mac: the brand typeface and Windows-matched text sizes.** Labels, buttons, checkboxes and
+  menus now use Syne like the rest of the app (macOS had swapped in its system font), and all
+  text is a third larger, as on Windows: small text such as the info chips, section headings
+  and slider values was hard to read.
+- **Fixed:** the start screen's description was cut off at the top and bottom (Mac).
+- **Fixed:** EQ band names and the 1.25k label were cut off; band names now alternate between
+  two lines under the sliders.
+- **Fixed:** the Record button's label was cut off while the recorder was open.
+- **Fixed (Mac):** the Export dialog's file name and folder fields were too narrow.
 
 ## 1.0.7
 

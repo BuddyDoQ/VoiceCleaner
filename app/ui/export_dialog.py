@@ -30,6 +30,8 @@ class ExportDialog(QDialog):
 
         form = QFormLayout()
         form.setSpacing(10)
+        # macOS defaults to fields at their size hint (narrow); grow them as on Windows
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.name = QLineEdit(suggested_name or f"{source.stem}_enhanced")
         form.addRow("File name", self.name)
 

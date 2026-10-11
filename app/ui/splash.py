@@ -89,7 +89,7 @@ class SplashScreen(QWidget):
         p.drawPixmap(34, 44, self._logo)
         x = 140
         f = QFont(theme.FONT_MONO)
-        f.setPointSizeF(8)
+        f.setPointSizeF(theme.pt(8))
         f.setLetterSpacing(QFont.AbsoluteSpacing, 2)
         p.setFont(f)
         p.setPen(theme.qcolor(theme.ACCENT))
@@ -101,7 +101,7 @@ class SplashScreen(QWidget):
         p.setPen(theme.qcolor(theme.TEXT))
         p.drawText(QRectF(x, 60, W - x - 24, 52), Qt.AlignLeft | Qt.AlignVCenter, APP_NAME.upper())
         f = QFont(theme.FONT_MONO)
-        f.setPointSizeF(8)
+        f.setPointSizeF(theme.pt(8))
         f.setLetterSpacing(QFont.AbsoluteSpacing, 2)
         p.setFont(f)
         p.setPen(theme.qcolor(theme.FAINT))

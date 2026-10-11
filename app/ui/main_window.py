@@ -45,7 +45,7 @@ from .brand import STUDIO_NAME, AboutDialog, OpenSessionDialog, SessionNameDialo
 from .compile_panel import CompilePanel
 from .playback_panel import PlaybackPanel
 from .update_dialog import UpdateChecker, UpdateDialog
-from .widgets import DropZone, ElidedLabel, MetricsPanel, card, label
+from .widgets import DropZone, ElidedLabel, MetricsPanel, card, label, reserve_bold_width
 
 log = get_logger("ui")
 
@@ -381,6 +381,7 @@ class MainWindow(QMainWindow):
             self.record_toggle.setCursor(Qt.PointingHandCursor)
             self.record_toggle.setToolTip("Record from a microphone or desktop audio into the Original track (R)")
             self.record_toggle.toggled.connect(self._show_record_panel)
+            reserve_bold_width(self.record_toggle)  # bold and red while the recorder is open
             head.addWidget(self.record_toggle)
         play = QPushButton("▶  Play")
         play.setProperty("role", "ghost")

@@ -205,7 +205,7 @@ class WaveformView(QWidget):
                 return
             p.setPen(theme.qcolor(theme.FAINT))
             f = QFont(self.font())
-            f.setPointSizeF(10.5)
+            f.setPointSizeF(theme.pt(10.5))
             p.setFont(f)
             p.drawText(r, Qt.AlignCenter, self.placeholder)
             return
@@ -218,7 +218,7 @@ class WaveformView(QWidget):
                 p.fillRect(QRectF(xa, r.top(), xb - xa, r.height()), theme.qcolor(theme.SUCCESS, 18))
                 p.fillRect(QRectF(xa, r.top() - 6, xb - xa, 3), theme.qcolor(theme.SUCCESS, 200))
                 f = QFont(self.font())
-                f.setPointSizeF(7.5)
+                f.setPointSizeF(theme.pt(7.5))
                 p.setFont(f)
                 p.setPen(theme.qcolor(theme.SUCCESS))
                 p.drawText(QRectF(xa + 4, r.top() - 3, max(60.0, xb - xa), 14), Qt.AlignLeft | Qt.AlignTop,
@@ -322,7 +322,7 @@ class WaveformView(QWidget):
         p.fillRect(QRectF(max(r.left(), x), r.top(), min(band, r.right() - x), r.height()), grad)
         mid = r.center().y()
         f = QFont(self.font())
-        f.setPointSizeF(10.5)
+        f.setPointSizeF(theme.pt(10.5))
         p.setFont(f)
         p.setPen(theme.qcolor(theme.TEXT))
         text = self.busy_text
@@ -367,7 +367,7 @@ class WaveformView(QWidget):
         target = span / max(1, r.width() / 90)
         step = next((s for s in steps if s >= target), steps[-1])
         f = QFont(self.font())
-        f.setPointSizeF(8)
+        f.setPointSizeF(theme.pt(8))
         p.setFont(f)
         t = np.ceil(self.t0 / step) * step
         y = r.bottom() + 4

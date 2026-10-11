@@ -95,7 +95,7 @@ class EQCurve(QWidget):
             p.setPen(QPen(theme.qcolor(theme.BORDER if db else "#3a4150"), 1))
             p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y))
         f = QFont(self.font())
-        f.setPointSizeF(7.5)
+        f.setPointSizeF(theme.pt(7.5))
         p.setFont(f)
         for hz, txt in ((100, "100"), (1000, "1k"), (10000, "10k")):
             x = self._x(hz, r)
@@ -143,14 +143,9 @@ class BandSlider(QWidget):
         self.slider.setToolTip(f"{label} ({_fmt_hz(freq)}). Double-click to reset.")
         self.slider.valueChanged.connect(self._changed)
         v.addWidget(self.slider, alignment=Qt.AlignHCenter)
-        hz = QLabel(_fmt_hz(freq))
-        hz.setAlignment(Qt.AlignCenter)
-        hz.setProperty("role", "eqfreq")
-        v.addWidget(hz)
-        name = QLabel(label)
-        name.setAlignment(Qt.AlignCenter)
-        name.setProperty("role", "eqname")
-        v.addWidget(name)
+        self.hz = _fmt_hz(freq)
+        self.name = label
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)  # equal columns
         self.slider.mouseDoubleClickEvent = lambda _e: self.slider.setValue(0)
 
     def value(self) -> float:
@@ -173,6 +168,53 @@ class BandSlider(QWidget):
         self.valueChanged.emit(self.index, self.value())
 
 
+class _BandLabels(QWidget):
+    """A row of per-band texts, each centred under its slider. Drawn rather than one QLabel
+    per column: a column (~33 px) is narrower than "Presence" or "1.25k", and a QLabel is
+    clipped to its column. With ``stagger`` the texts alternate between two lines, so each
+    has about two columns of room and neighbours never touch."""
+
+    def __init__(self, bands, text_of, mono: bool, size_pt: float, color_attr: str, stagger: bool = False):
+        super().__init__()
+        self.bands, self.text_of, self.mono, self.size_pt = bands, text_of, mono, size_pt
+        self.color_attr, self.lines = color_attr, 2 if stagger else 1
+        for b in bands:
+            b.slider.installEventFilter(self)  # follow the sliders when they move or resize
+        self._font()
+
+    def _font(self):
+        f = theme.mono_font(self.size_pt) if self.mono else QFont(theme.app_font())
+        if not self.mono:
+            f.setPointSizeF(theme.pt(self.size_pt))
+        self.setFont(f)
+        self.setFixedHeight(self.fontMetrics().height() * self.lines + 1)
+
+    def eventFilter(self, obj, event):
+        if event.type() in (event.Type.Move, event.Type.Resize):
+            self.update()
+        return False
+
+    def changeEvent(self, e):
+        if e.type() in (e.Type.StyleChange, e.Type.FontChange):
+            self._font()
+        super().changeEvent(e)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setFont(self.font())
+        p.setPen(theme.qcolor(getattr(theme, self.color_attr)))
+        fm = self.fontMetrics()
+        line_h = fm.height()
+        for i, b in enumerate(self.bands):
+            text = self.text_of(b)
+            cx = b.slider.mapTo(self.parentWidget(), b.slider.rect().center()).x() - self.x()
+            w = fm.horizontalAdvance(text) + 2
+            x = min(max(0, cx - w / 2), self.width() - w)  # keep the end texts inside
+            y = (i % self.lines) * line_h
+            p.drawText(QRectF(x, y, w, line_h), Qt.AlignCenter, text)
+        p.end()
+
+
 class GraphicEQ(QWidget):
     changed = Signal(list)
 
@@ -186,7 +228,11 @@ class GraphicEQ(QWidget):
             b = BandSlider(i, freq, label)
             b.valueChanged.connect(lambda *_: self.changed.emit(self.values()))
             grid.addWidget(b, 0, i)
+            grid.setColumnStretch(i, 1)
             self.bands.append(b)
+        n = len(self.bands)
+        grid.addWidget(_BandLabels(self.bands, lambda b: b.hz, True, 7.5, "MUTED"), 1, 0, 1, n)
+        grid.addWidget(_BandLabels(self.bands, lambda b: b.name, False, 7, "FAINT", stagger=True), 2, 0, 1, n)
 
     def values(self) -> list[float]:
         return [b.value() for b in self.bands]

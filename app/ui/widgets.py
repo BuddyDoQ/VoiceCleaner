@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
                                QWidget)
 
@@ -70,6 +70,31 @@ class _FitWrappedHeight(QObject):
             if need > 0 and obj.minimumHeight() != need:
                 obj.setMinimumHeight(need)
         return False
+
+
+class _ReserveBoldWidth(QObject):
+    """Keeps a checkable button wide enough for its label in bold (its checked style)."""
+
+    def __init__(self, button, extra: int):
+        super().__init__(button)
+        self.extra = extra
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.Show, QEvent.Polish, QEvent.FontChange, QEvent.StyleChange):
+            f = QFont(obj.font())
+            f.setWeight(QFont.DemiBold)
+            need = QFontMetrics(f).horizontalAdvance(obj.text()) + self.extra
+            if obj.minimumWidth() != need:
+                obj.setMinimumWidth(need)
+        return False
+
+
+def reserve_bold_width(button, extra: int = 28):
+    """A button whose checked style makes its text bold keeps the width it measured for normal
+    text and cuts the bold text off ("Recorc"). Reserve the bold width; ``extra`` covers the
+    stylesheet padding and border. Measured when the style applies, not at construction."""
+    button.installEventFilter(_ReserveBoldWidth(button, extra))
+    return button
 
 
 def keep_all_lines(lbl: QLabel) -> QLabel:
@@ -238,7 +263,7 @@ class MetricsPanel(QFrame):
         right.addWidget(disclaimer)
         right.addSpacing(6)
         self.notes = label("", "muted", wrap=True)
-        self.notes.setStyleSheet("font-size: 9pt;")
+        self.notes.setStyleSheet(f"font-size: {theme.pt(9)}pt;")
         right.addWidget(self.notes)
         right.addStretch(1)
         right_w = QWidget()

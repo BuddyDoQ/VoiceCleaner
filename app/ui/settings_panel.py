@@ -43,7 +43,7 @@ class ValueSlider(QWidget):
         self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.label.setMinimumWidth(10)
         if large:
-            self.label.setStyleSheet("font-size: 10.5pt; font-weight: 600;")
+            self.label.setStyleSheet(f"font-size: {theme.pt(10.5)}pt; font-weight: 600;")
         self.value_label = QLabel()
         self.value_label.setProperty("role", "muted")
         self.value_label.setMinimumWidth(64)
@@ -160,7 +160,7 @@ class SettingsPanel(QWidget):
         for b, text, fn in ((self.undo_btn, "\u21b6", self.undo), (self.redo_btn, "\u21b7", self.redo)):
             b.setText(text)
             b.setProperty("role", "link")
-            b.setStyleSheet("font-size: 13pt; padding: 0 3px;")
+            b.setStyleSheet(f"font-size: {theme.pt(13)}pt; padding: 0 3px;")
             b.setCursor(Qt.PointingHandCursor)
             b.setEnabled(False)
             b.clicked.connect(fn)
@@ -224,7 +224,7 @@ class SettingsPanel(QWidget):
         close = QToolButton()
         close.setText("\u00d7")
         close.setProperty("role", "link")
-        close.setStyleSheet("font-size: 13pt; padding: 0 4px;")
+        close.setStyleSheet(f"font-size: {theme.pt(13)}pt; padding: 0 4px;")
         close.setCursor(Qt.PointingHandCursor)
         close.setToolTip("Hide this note (the AUTO labels stay). Menu \u2192 Show Tips Again brings it back.")
         close.clicked.connect(self.hide_smart_note)

@@ -114,6 +114,31 @@ def main() -> int:
     config = UserConfig.load()
     theme.apply(app, config.extra.get("theme", "auto"))
 
+    class _FinderOpen(QObject):
+        """macOS delivers files opened from Finder (double-click, drop on the Dock icon)
+        as QFileOpenEvent, not as command-line arguments. A file that opened the app
+        arrives while the splash is up, before the window exists: keep it until then."""
+
+        def __init__(self, parent):
+            super().__init__(parent)
+            self.window = None
+            self.pending: list[Path] = []
+
+        def eventFilter(self, obj, event):
+            if event.type() == QEvent.Type.FileOpen:
+                p = Path(event.file())
+                if p.suffix.lower() in (".wav", ".wave") and p.exists():
+                    if self.window is None:
+                        self.pending.append(p)
+                    else:
+                        self.window.open_file(p)
+                return True
+            return False
+
+    # installed before the splash processes any events, so no FileOpen is lost
+    finder_open = _FinderOpen(app)
+    app.installEventFilter(finder_open)
+
     from app.ui.splash import SplashScreen
 
     splash = SplashScreen()
@@ -161,20 +186,10 @@ def main() -> int:
     if window.engine_ready:
         reveal()
 
-    class _FinderOpen(QObject):
-        """macOS delivers files opened from Finder (double-click, drop on the Dock icon)
-        as QFileOpenEvent, not as command-line arguments."""
-
-        def eventFilter(self, obj, event):
-            if event.type() == QEvent.Type.FileOpen:
-                p = Path(event.file())
-                if p.suffix.lower() in (".wav", ".wave") and p.exists():
-                    window.open_file(p)
-                return True
-            return False
-
-    finder_open = _FinderOpen(app)
-    app.installEventFilter(finder_open)
+    finder_open.window = window
+    for p in finder_open.pending[-1:]:  # the window shows one recording: the last one asked for
+        window.open_file(p)
+    finder_open.pending.clear()
     for arg in sys.argv[1:]:
         p = Path(arg)
         if p.suffix.lower() in (".wav", ".wave") and p.exists():

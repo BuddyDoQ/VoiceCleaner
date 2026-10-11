@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QByteArray, QEvent, Qt, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QEvent, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QButtonGroup, QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
                                QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
@@ -32,6 +32,7 @@ from ..utils.shell import reveal, shortcut_text
 from ..workers.batch_worker import BatchOptions, start_batch
 from ..workers.processing_worker import TaskHandle, run_task
 from . import theme
+from .activity import ActivityTracker, eta_text
 from .audio_player import AudioPlayer
 from .batch_panel import BatchPanel
 from .export_dialog import ExportDialog
@@ -49,6 +50,9 @@ log = get_logger("ui")
 
 WAV_EXTENSIONS = (".wav", ".wave")
 MAX_RECENT = 10
+PREVIEW_SETTLE_MS = 600  # live preview starts this long after the last settings change
+PREVIEW_SECONDS = 10.0  # length of the live preview around the playhead
+PREVIEW_MAX_SELECTION_S = 30.0  # a longer selection is previewed from its start
 
 SHORTCUTS = [
     ("Space", "Play / pause"),
@@ -59,7 +63,9 @@ SHORTCUTS = [
     ("Ctrl+E", "Export enhanced audio"),
     ("Ctrl+O", "Open a WAV file"),
     ("R", "Record / stop recording"),
+    ("L", "Loop the selection (or the whole recording)"),
     ("Ctrl+Shift+N", "New session"),
+    ("Ctrl+Z / Ctrl+Y", "Undo / redo a settings change"),
     ("Esc", "Cancel"),
     ("Ctrl+/", "This list"),
     ("Ctrl+mouse wheel", "Zoom the waveform"),
@@ -68,6 +74,9 @@ SHORTCUTS = [
 
 
 class MainWindow(QMainWindow):
+    engineStatus = Signal(str)  # what the engine is loading (shown on the splash)
+    engineReady = Signal()  # the AI engine is ready, or failed and DSP will be used
+
     def __init__(self, config: UserConfig):
         super().__init__()
         self.config = config
@@ -81,6 +90,10 @@ class MainWindow(QMainWindow):
         self._mm_ready = threading.Event()
         self._batch = None
         self._result_settings: dict | None = None
+        self._enh_overview = None  # the enhanced track's waveform without a live preview
+        self._preview_task = None
+        self._preview_gen = 0
+        self._export_after_enhance = False
         self._pending_warnings: list[str] = []
         self._last_notes: list[str] = []
 
@@ -128,6 +141,15 @@ class MainWindow(QMainWindow):
         self.batch_panel.set_output_dir(config.batch_output_dir)
         self.tabs.addTab(self.batch_panel, "BATCH")
         self.tabs.currentChanged.connect(self._tab_changed)
+        self._tab_titles = {self.tabs.widget(i): self.tabs.tabText(i) for i in range(self.tabs.count())}
+        self.activity = ActivityTracker(self)
+        self.activity.changed.connect(self._activity_changed)
+        self.compile_panel.activity = self.activity
+        self._activity_timer = QTimer(self)  # keeps elapsed / time-left fresh
+        self._activity_timer.setInterval(1000)
+        self._activity_timer.timeout.connect(self._activity_changed)
+        self._job_key: str | None = None
+        self._job_failed = False
         self.tabs.tabBar().setStyleSheet("QTabBar { margin-left: 18px; }")
         root.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
@@ -171,6 +193,16 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.session_btn)
         self._update_session_ui()
         lay.addStretch(1)
+        self.activity_chip = QPushButton()
+        self.activity_chip.setProperty("role", "activity")
+        self.activity_chip.setCursor(Qt.PointingHandCursor)
+        self.activity_chip.clicked.connect(self._activity_clicked)
+        self.activity_chip.setVisible(False)
+        self.activity_chip.ensurePolished()
+        # one width for every label it shows, so the header never shifts while it updates
+        longest = "● UPDATING PREVIEW · 100%  +9"
+        self.activity_chip.setFixedWidth(self.activity_chip.fontMetrics().horizontalAdvance(longest) + 34)
+        lay.addWidget(self.activity_chip)
         self.device_chip = label("Detecting hardware\u2026", "chip")
         self.device_chip.setToolTip("The processor used for AI enhancement. Change it in the menu.")
         self.model_chip = label("Loading AI model\u2026", "chip")
@@ -296,7 +328,9 @@ class MainWindow(QMainWindow):
         for wv in (self.wave_orig, self.wave_enh):
             wv.seekRequested.connect(self._seek)
             wv.viewChanged.connect(self._sync_view)
+        # one selection shared by both tracks: drag on either to loop or to learn noise
         self.wave_orig.selectionChanged.connect(self._selection_changed)
+        self.wave_enh.selectionChanged.connect(self._selection_changed)
         self.wave_orig.activated.connect(lambda: self._activate("original"))
         self.wave_enh.activated.connect(lambda: self._activate("enhanced"))
         lay.addWidget(orig_card, 1)
@@ -413,6 +447,14 @@ class MainWindow(QMainWindow):
         self.time_label = label("0:00.0 / 0:00.0")
         self.time_label.setProperty("role", "mono")
         lay.addWidget(self.time_label)
+        self.loop_btn = QPushButton("\u27f2 LOOP")
+        self.loop_btn.setProperty("role", "toggle")
+        self.loop_btn.setCheckable(True)
+        self.loop_btn.setCursor(Qt.PointingHandCursor)
+        self.loop_btn.setToolTip("Loop playback (L).\nDrag across either waveform to loop just that passage,\n"
+                                 "then switch A/B while it repeats. Without a selection the whole recording loops.")
+        self.loop_btn.toggled.connect(lambda _: self._update_loop())
+        lay.addWidget(self.loop_btn)
 
         self.match_box = QCheckBox("Equal-loudness comparison")
         self.match_box.setToolTip("Plays the original at the same loudness as the enhanced version, so the\n"
@@ -512,6 +554,15 @@ class MainWindow(QMainWindow):
         a.addWidget(self.status_label)
         a.addWidget(self.progress)
         a.addWidget(self.speed_label)
+        self.live_box = QCheckBox("Live preview of changes")
+        self.live_box.setToolTip(
+            "After the first Enhance, changing a setting re-processes about 10 seconds around the\n"
+            "playhead (or your selection) within a second or two, so you hear the change right away.\n"
+            "Enhance again to apply it to the whole recording. Fast with an NVIDIA GPU; slower on a CPU.")
+        live = self.config.extra.get("live_preview")
+        self.live_box.setChecked(bool(live) if live is not None else False)  # default set once the device is known
+        self.live_box.toggled.connect(self._live_toggled)
+        a.addWidget(self.live_box)
         row = QHBoxLayout()
         self.enhance_btn = QPushButton("Enhance")
         self.enhance_btn.setProperty("role", "primary")
@@ -548,6 +599,10 @@ class MainWindow(QMainWindow):
         sc("Ctrl+Return", self.enhance)
         sc(Qt.Key_Escape, self._escape)
         sc(Qt.Key_R, self._record_shortcut)
+        sc(QKeySequence.Undo, self._undo_shortcut)
+        sc(QKeySequence.Redo, self._redo_shortcut)
+        sc("Ctrl+Shift+Z", self._redo_shortcut)
+        sc(Qt.Key_L, lambda: self.audio is not None and self.loop_btn.toggle())
 
     # ============================================================================ state
     def _set_empty_state(self):
@@ -559,7 +614,16 @@ class MainWindow(QMainWindow):
         self.status_label.setText("Open a recording to begin.")
         self.speed_label.setText("")
 
+    def _begin_job(self, key: str, label_text: str):
+        """A task of the Enhance tab starts: report it to the activity tracker."""
+        self._job_key, self._job_failed = key, False
+        self.activity.start(key, label_text, self.tabs.widget(0))
+
     def _busy(self, busy: bool, message: str = ""):
+        if not busy and self._job_key:
+            self.activity.finish(self._job_key, ok=not self._job_failed)
+            self._job_key = None
+            self.speed_label.setText("")  # drop the elapsed-time line; callers may set a result line
         self.enhance_btn.setEnabled(not busy and self.audio is not None)
         self.cancel_btn.setVisible(busy)
         self.progress.setVisible(busy)
@@ -576,6 +640,53 @@ class MainWindow(QMainWindow):
         self.progress.setValue(int(frac * 1000))
         if message:
             self.status_label.setText(message)
+        if self._job_key:
+            self.activity.update(self._job_key, frac, message)
+            self.speed_label.setText(eta_text(self.activity.job(self._job_key)))
+        if self._job_key == "enhance":
+            self.wave_enh.set_busy(message or "Enhancing\u2026", frac)
+        elif self._job_key == "analyze" and self.wave_orig.busy_text:
+            self.wave_orig.set_busy(message or "Analyzing\u2026", frac)
+
+    # ============================================================================ activity
+    SHOW_AFTER_S = 0.5
+
+    def _activity_changed(self):
+        # jobs younger than SHOW_AFTER_S are not shown yet: quick ones (e.g. an automatic
+        # compile preview) would only make the chip flicker
+        young = [j for j in self.activity.jobs.values() if j.elapsed < self.SHOW_AFTER_S]
+        if young:
+            QTimer.singleShot(int((self.SHOW_AFTER_S - min(j.elapsed for j in young)) * 1000) + 20,
+                              self._activity_changed)
+        shown = {k: j for k, j in self.activity.jobs.items() if j.elapsed >= self.SHOW_AFTER_S}
+        job = max(shown.values(), key=lambda j: j.started, default=None)
+        tabs = {}
+        for j in sorted(shown.values(), key=lambda j: j.started):
+            if j.tab is not None:
+                tabs[j.tab] = j
+        for page, title in self._tab_titles.items():
+            j = tabs.get(page)
+            badge = "" if j is None else (j.badge or ("" if j.fraction is None else f"{j.fraction * 100:.0f}%"))
+            text = f"{title} \u00b7 {badge}" if badge else (f"{title} \u2022" if j is not None else title)
+            i = self.tabs.indexOf(page)
+            if i >= 0 and self.tabs.tabText(i) != text:
+                self.tabs.setTabText(i, text)
+        self.activity_chip.setVisible(job is not None)
+        if job is None:
+            self._activity_timer.stop()
+            return
+        if not self._activity_timer.isActive():
+            self._activity_timer.start()
+        pct = "" if job.fraction is None else f" \u00b7 {job.fraction * 100:.0f}%"
+        more = len(shown) - 1
+        self.activity_chip.setText(f"\u25cf {job.label.upper()}{pct}" + (f"  +{more}" if more > 0 else ""))
+        tip = [f"{j.label}: {j.message or 'working'} ({eta_text(j)})" for j in shown.values()]
+        self.activity_chip.setToolTip("\n".join(tip) + ("\nClick to go to it." if job.tab is not None else ""))
+
+    def _activity_clicked(self):
+        job = max(self.activity.jobs.values(), key=lambda j: j.started, default=None)
+        if job is not None and job.tab is not None:
+            self.tabs.setCurrentWidget(job.tab)
 
     def _task_running(self) -> bool:
         return self.task is not None and self.task.running
@@ -595,7 +706,10 @@ class MainWindow(QMainWindow):
         def work(ctx):
             from ..ai.model_manager import ModelManager
 
+            ctx.progress(0.5, "Loading AI model…")
             mm = ModelManager(pref)
+            if mm.device.kind == "cuda":
+                ctx.progress(0.6, f"Loading AI model on the GPU ({mm.device.name.removeprefix('NVIDIA ')})…")
             mm.preload()
             return mm
 
@@ -603,6 +717,12 @@ class MainWindow(QMainWindow):
             self.model_manager = mm
             self._mm_ready.set()
             self._update_engine_chips()
+            if self.config.extra.get("live_preview") is None:  # first run: on where it is fast
+                self.live_box.blockSignals(True)
+                self.live_box.setChecked(mm.device.kind == "cuda")
+                self.live_box.blockSignals(False)
+            self.engineStatus.emit("Ready")
+            self.engineReady.emit()
 
         def failed(title, message, _cancelled):
             self._mm_ready.set()
@@ -610,8 +730,15 @@ class MainWindow(QMainWindow):
             self.device_chip.setText("CPU")
             self.settings_panel.set_ai_available(False)
             log.warning("Engine init failed: %s", message)
+            self.engineReady.emit()
 
-        self._engine_task = run_task(work, self, on_success=done, on_error=failed)
+        self.engineStatus.emit("Loading AI engine (PyTorch)…")
+        self._engine_task = run_task(work, self, on_success=done, on_error=failed,
+                                     on_progress=lambda f, m: m and self.engineStatus.emit(m))
+
+    @property
+    def engine_ready(self) -> bool:
+        return self._mm_ready.is_set()
 
     def _update_engine_chips(self):
         mm = self.model_manager
@@ -668,6 +795,7 @@ class MainWindow(QMainWindow):
             return
         self.player.stop()
         self.config.last_open_dir = str(path.parent)
+        self._begin_job("analyze", "Analyzing")
         self._busy(True, "Analyzing audio...")
         self.wave_orig.set_busy("Analyzing…") if self.audio else None
 
@@ -690,6 +818,11 @@ class MainWindow(QMainWindow):
         self.result = None
         self.learned_profile = None
         self.selection = None
+        self._cancel_preview()
+        self._enh_overview = None
+        self.wave_enh.preview_region = None
+        self.player.set_overlay("enhanced", None)
+        self.wave_enh.set_selection(None)
         self.profile_label.setText("")
         info = audio.info
         self.file_name.setText(info.path.name)
@@ -720,6 +853,7 @@ class MainWindow(QMainWindow):
         self.player.set_source("original", audio.samples, audio.sample_rate)
         self.player.set_match_gain("original", 1.0)
         self._activate("original")
+        self._update_loop()
         self.player.seek(0)
 
         self.settings_panel.set_analysis(analysis)
@@ -742,6 +876,7 @@ class MainWindow(QMainWindow):
                 ("Dynamic range", f(a.loudness_range_lu, "LU"))]
 
     def _task_failed(self, title: str, message: str, cancelled: bool):
+        self._job_failed = True
         self.wave_orig.set_busy("")
         self.wave_enh.set_busy("")
         self._busy(False, "Cancelled." if cancelled else "")
@@ -755,11 +890,13 @@ class MainWindow(QMainWindow):
     def enhance(self):
         if self.audio is None or self._task_running():
             return
+        self._cancel_preview(wait=True)
         self.player.pause() if self.player.active_source == "enhanced" else None
         settings = self.settings_panel.current()
         audio, analysis, profile = self.audio, self.analysis, self.learned_profile
+        self._begin_job("enhance", "Enhancing")
         self._busy(True, "Preparing...")
-        self.wave_enh.set_busy("Enhancing…")
+        self.wave_enh.set_busy("Preparing\u2026", 0.0)
 
         def work(ctx):
             if not self._mm_ready.is_set():
@@ -776,6 +913,8 @@ class MainWindow(QMainWindow):
         result, overview = payload
         self.result = result
         self._result_settings = result.settings.to_dict()
+        self._enh_overview = overview
+        self._clear_preview()
         pos = self.player.position
         self.player.set_source("enhanced", result.samples, result.sample_rate)
         self.wave_enh.set_busy("")
@@ -798,6 +937,9 @@ class MainWindow(QMainWindow):
             f"{result.realtime_factor:.1f}x realtime • {result.device_label}")
         if result.attempts > 1:
             self.speed_label.setText(self.speed_label.text() + f" • Quality check adjusted settings ({result.attempts} passes).")
+        if self._export_after_enhance:
+            self._export_after_enhance = False
+            QTimer.singleShot(0, self.export)
 
     def cancel_task(self):
         if self._task_running():
@@ -813,6 +955,10 @@ class MainWindow(QMainWindow):
             then = {k: v for k, v in self._result_settings.items() if k not in self.PAUSE_FIELDS}
             self.enhance_btn.setText("Enhance Again" if now != then else "Enhance")
             self._update_pause_note()
+            if now == then:
+                self._clear_preview()  # back to what the enhanced track already has
+            else:
+                self._schedule_preview()
 
     def _pause_note(self) -> str:
         if self.result is None:
@@ -892,9 +1038,151 @@ class MainWindow(QMainWindow):
             self.wave_orig.set_selection(None)
             self._selection_changed(None)
 
+    # ============================================================================ undo
+    def _undo_shortcut(self):
+        if self.tabs.currentIndex() == 0:  # settings live on the Enhance tab
+            self.settings_panel.undo()
+
+    def _redo_shortcut(self):
+        if self.tabs.currentIndex() == 0:
+            self.settings_panel.redo()
+
+    # ============================================================================ live preview
+    def _live_toggled(self, on: bool):
+        self.config.extra["live_preview"] = on
+        if on:
+            self._schedule_preview()
+        else:
+            self._cancel_preview()
+            self._clear_preview()
+
+    def _preview_possible(self) -> bool:
+        return (self.live_box.isChecked() and self.result is not None and self.audio is not None
+                and not self.audio.is_disk_backed and self._mm_ready.is_set() and not self._task_running())
+
+    def _schedule_preview(self):
+        if not self._preview_possible():
+            return
+        if not hasattr(self, "_preview_timer"):
+            self._preview_timer = QTimer(self)
+            self._preview_timer.setSingleShot(True)
+            self._preview_timer.timeout.connect(self._start_preview)
+        self._preview_timer.start(PREVIEW_SETTLE_MS)
+
+    def _preview_window(self) -> tuple[float, float]:
+        dur = self.audio.duration
+        if self.selection:
+            a, b = self.selection
+            return a, min(b, a + PREVIEW_MAX_SELECTION_S)
+        pos = self.player.position
+        a = max(0.0, min(pos - 0.5, dur - PREVIEW_SECONDS))
+        return a, min(dur, a + PREVIEW_SECONDS)
+
+    def _start_preview(self):
+        if not self._preview_possible() or self.enhance_btn.text() != "Enhance Again":
+            return
+        self._cancel_preview()
+        self._preview_gen += 1
+        gen = self._preview_gen
+        settings = self.settings_panel.current()
+        audio, analysis, profile = self.audio, self.analysis, self.learned_profile
+        t0, t1 = self._preview_window()
+        self.activity.start("preview", "Live preview", self.tabs.widget(0))
+
+        def work(ctx):
+            ctx.progress(0.0, "Previewing the new settings...")
+            return EnhancementPipeline(self._get_model_manager()).preview(
+                audio, analysis, settings, t0, t1, ctx, learned_profile=profile)
+
+        def done(pr):
+            self.activity.finish("preview")
+            if gen == self._preview_gen and self.result is not None and audio is self.audio:
+                self._show_preview(pr)
+
+        def failed(_title, message, cancelled):
+            self.activity.finish("preview", ok=False)
+            if not cancelled:
+                log.warning("Live preview failed: %s", message)
+
+        self._preview_task = run_task(work, self, on_success=done, on_error=failed,
+                                      on_progress=lambda f, m: self.activity.update("preview", f, m))
+
+    def _show_preview(self, pr):
+        base = self.result.samples
+        a, x = pr.start_frame, pr.samples
+        n = min(x.shape[0], base.shape[0] - a)
+        x = x[:n].copy()
+        # blend into the enhanced track at both ends, so switching in and out does not click
+        k = max(1, min(n // 4, int(0.03 * pr.sample_rate)))
+        ramp = np.linspace(0.0, 1.0, k, dtype=np.float32)[:, None]
+        edge = np.asarray(base[a : a + k], dtype=np.float32)
+        x[:k] = edge * (1 - ramp) + x[:k] * ramp
+        edge = np.asarray(base[a + n - k : a + n], dtype=np.float32)
+        x[n - k :] = x[n - k :] * (1 - ramp) + edge * ramp
+        self.player.set_overlay("enhanced", a, x)
+        if self._enh_overview is not None:
+            self.wave_enh.set_overview(self._enh_overview.patched(a, x, base), keep_view=True)
+        self.wave_enh.preview_region = pr.window
+        self.wave_enh.update()
+        t0, t1 = pr.window
+        self.speed_label.setText(f"Live preview {format_duration(t0)}\u2013{format_duration(t1)} "
+                                 f"({pr.processing_seconds:.1f} s) \u2022 Enhance Again for the whole recording")
+
+    def _cancel_preview(self, wait: bool = False):
+        if hasattr(self, "_preview_timer"):
+            self._preview_timer.stop()
+        t = self._preview_task
+        if t is not None and t.running:
+            self._preview_gen += 1  # whatever it returns is outdated
+            t.cancel()
+            if wait:
+                t.wait(5000)
+
+    def _clear_preview(self):
+        if self.wave_enh.preview_region is None:
+            return
+        self.player.set_overlay("enhanced", None)
+        self.wave_enh.preview_region = None
+        if self._enh_overview is not None:
+            self.wave_enh.set_overview(self._enh_overview, keep_view=True)
+        self.wave_enh.update()
+
+    def _confirm_export_stale(self) -> bool:
+        """Settings changed since the last Enhance: offer to apply them before exporting."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("Export")
+        box.setText("<b>Your settings changed since the last Enhance.</b>")
+        box.setInformativeText("The exported file uses the last Enhance. Live preview only covers a short part. "
+                               "Enhance the whole recording with the new settings first?")
+        again = box.addButton("Enhance and Export", QMessageBox.AcceptRole)
+        old = box.addButton("Export Previous Result", QMessageBox.DestructiveRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(again)
+        box.exec()
+        if box.clickedButton() is again:
+            self._export_after_enhance = True
+            self.enhance()
+            return False
+        return box.clickedButton() is old
+
+    # ============================================================================ loop
+    def _update_loop(self):
+        """Loop the selection, or the whole recording without one, while Loop is on."""
+        on = self.loop_btn.isChecked() and self.audio is not None
+        region = (self.selection or (0.0, self.audio.duration)) if on else None
+        self.player.set_loop(region)
+        for wv in (self.wave_orig, self.wave_enh):
+            wv.loop_region = region
+            wv.update()
+
     # ============================================================================ noise profile
     def _selection_changed(self, sel):
         self.selection = sel
+        for wv in (self.wave_orig, self.wave_enh):
+            if wv.selection != sel:
+                wv.set_selection(sel)
+        self._update_loop()
         if sel and not self.learned_profile:
             self.profile_label.setText(f"Selected {sel[1] - sel[0]:.1f} s")
         elif not sel and not self.learned_profile:
@@ -1086,6 +1374,8 @@ class MainWindow(QMainWindow):
     def export(self):
         if self.result is None or self._task_running():
             return
+        if self.enhance_btn.text() == "Enhance Again" and not self._confirm_export_stale():
+            return
         suggested = self.session.export_path(self.audio.info.path)
         dlg = ExportDialog(self.audio.info.path, self.result.sample_rate, str(self.session.exports_dir),
                            self.config.output_format, self.config.output_bit_depth, self.config.output_sample_rate, self,
@@ -1100,6 +1390,7 @@ class MainWindow(QMainWindow):
         self.config.output_sample_rate = v["sample_rate"]
         result, source = self.result, self.audio.info.path
         pauses = self.settings_panel.current().pause_settings()
+        self._begin_job("export", "Exporting")
         self._busy(True, "Exporting...")
 
         def work(ctx):
@@ -1160,6 +1451,12 @@ class MainWindow(QMainWindow):
         runner.fileProgress.connect(bp.file_progress)
         runner.fileFinished.connect(bp.file_finished)
         runner.finished.connect(self._batch_done)
+        n = len(files)
+        self.activity.start("batch", "Batch", self.batch_panel)
+        self.activity.update("batch", 0.0, "Starting", badge=f"0/{n}")
+        runner.fileStarted.connect(lambda i: self.activity.update("batch", i / n, f"File {i + 1} of {n}",
+                                                                  badge=f"{i + 1}/{n}"))
+        runner.fileProgress.connect(lambda i, f, m: self.activity.update("batch", (i + f) / n, m))
 
     def _cancel_batch(self):
         if self._batch:
@@ -1169,6 +1466,7 @@ class MainWindow(QMainWindow):
         thread, _ = self._batch
         thread.wait(2000)
         self._batch = None
+        self.activity.finish("batch")
         self.batch_panel.set_running(False)
         self.batch_panel.summary.setText(self.batch_panel.summary.text() + " • finished")
         self.playback.refresh()
@@ -1228,8 +1526,12 @@ class MainWindow(QMainWindow):
     def _auto_check_updates(self):
         """Every start: one small request. Whether a found update is shown is decided by
         Skip/Later in _update_found, never by when the last check happened."""
-        if self._auto_updates_enabled():
-            self.check_for_updates(manual=False)
+        if not self._auto_updates_enabled():
+            return
+        if not self.isVisible():  # still behind the splash: ask again once the window is up
+            QTimer.singleShot(2000, self._auto_check_updates)
+            return
+        self.check_for_updates(manual=False)
 
     def check_for_updates(self, manual: bool = True):
         if self.update_checker.check(manual):
@@ -1423,8 +1725,15 @@ class MainWindow(QMainWindow):
                               progress=prog)
 
         log.info("Exporting compilation of %d takes to %s", len(comp.segments), v["path"])
+        self._job_key, self._job_failed = "export-compilation", False
+        self.activity.start("export-compilation", "Exporting", self.compile_panel)
+
+        def progress(f, m):
+            self.compile_panel.preview_state.setText(f"{m} {f:.0%}")
+            self.activity.update("export-compilation", f, m)
+
         self.task = run_task(work, self, on_success=self._exported, on_error=self._task_failed,
-                             on_progress=lambda f, m: self.compile_panel.preview_state.setText(f"{m} {f:.0%}"))
+                             on_progress=progress)
 
     def _add_to_batch(self, paths):
         self.batch_panel.add_files([Path(p) for p in paths])

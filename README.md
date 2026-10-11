@@ -148,11 +148,30 @@ The guiding rule is *better speech, not obviously processed speech*.
 * **Advanced:** noise floor bias, spectral subtraction strength, noise gate, residual
   noise floor, presence, clarity, low-end cleanup, reverb/echo, target loudness and
   peak ceiling.
-* **Learn Noise Profile:** drag across a background-only part of the *Original*
-  waveform, then click *Learn Noise Profile*.
+* **Learn Noise Profile:** drag across a background-only part of either waveform, then
+  click *Learn Noise Profile*.
 * **A/B:** press `A` / `B` (or the buttons) during playback; the switch is instant and
   click-free at the same position. *Equal-loudness comparison* plays the original at
   the enhanced loudness so you judge quality, not volume.
+* **Loop** (`L`): drag across either waveform and turn on *Loop* to repeat just that
+  passage while you switch A/B or change settings. Without a selection the whole
+  recording loops.
+* **Live preview of changes:** after the first Enhance, changing a setting re-processes
+  about 10 seconds around the playhead (or your selection, up to 30 s) a moment after
+  you stop adjusting. The previewed part is marked *LIVE PREVIEW* on the Enhanced track
+  and plays at the level a full Enhance would give it. *Enhance Again* applies the
+  settings to the whole recording; exporting first asks whether to do that. On by
+  default with an NVIDIA GPU (about a second per preview); it can be turned on for CPUs
+  too, where it is slower.
+* **Undo / redo** settings changes with `Ctrl+Z` / `Ctrl+Y` or the ↶ ↷ buttons next to
+  the preset. A slider drag is one step; the tooltip names the change.
+* **While working:** the step and percentage show on the waveform being processed, the
+  sidebar shows elapsed time and an estimate of the time left, a header chip shows the
+  running job from any tab (click it to go there), and the busy tab carries a badge
+  (for example *BATCH · 3/10*). On Windows the taskbar button shows the progress, and a
+  long job that finishes while VoiceCleaner is in the background flashes it.
+* **Start-up:** a splash screen appears immediately and shows what is loading; the
+  window opens once the AI engine is ready.
 * **Shortcuts:** `Space` play/pause, `A`/`B` switch, `Home` to start, `Ctrl+O` open,
   `Ctrl+Enter` enhance, `Ctrl+E` export, `R` record/stop, `Ctrl+Shift+N` new session,
   `Esc` cancel. `Space` plays whichever tab is in front (Enhance or Playback). `Ctrl+wheel` zooms the waveform.
@@ -199,8 +218,9 @@ The guiding rule is *better speech, not obviously processed speech*.
     end (adjustable) so breaths and soft onsets survive; 5 ms fades prevent clicks.
   * Optional gap between takes, and optional loudness matching between takes. A
     true-peak limiter keeps the result from clipping.
-  * Preview the result, then export it to the session's Exports folder as
-    `<Session> - Compilation.wav`.
+  * The preview updates by itself a moment after each change, so *Play* starts at once.
+    Changing the order while it plays keeps playing and continues at the same take.
+  * Export it to the session's Exports folder as `<Session> - Compilation.wav`.
 * **Shorten long pauses (optional, off by default):** pauses inside a recording that are
   longer than a threshold (1.0 s by default, adjustable from 0.3 to 5 s) are shortened to a natural pause (250 ms by
   default, adjustable up to 2 s). Both values are remembered between sessions. The kept pause is made of the start and end of the original silence, so

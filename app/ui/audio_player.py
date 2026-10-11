@@ -19,6 +19,7 @@ log = get_logger("player")
 
 SOURCES = ("original", "enhanced")
 SWITCH_FADE_S = 0.012
+LOOP_FADE_S = 0.004  # gentle fade at both loop ends so the jump back does not click
 # CoreAudio honours latency="low" with callbacks of a few frames (15 frames = 0.7 ms at
 # 22.05 kHz), far too short for a Python callback: any GIL pause becomes a dropout.
 # ~20 ms blocks keep playback clean; the A/B switch still lands within one block.
@@ -47,6 +48,8 @@ class AudioPlayer(QObject):
         self._stream = None
         self._lock = threading.Lock()
         self._ended = False
+        self._loop: tuple[int, int] | None = None  # frames [start, end) played over and over
+        self._overlay: dict[str, tuple[int, np.ndarray]] = {}  # source -> (start frame, samples) laid over it
         self._timer = QTimer(self)
         self._timer.setInterval(33)
         self._timer.timeout.connect(self._tick)
@@ -63,6 +66,15 @@ class AudioPlayer(QObject):
                 self._active = "original"
         if all(b is None for b in self._buffers.values()):
             self.stop()
+
+    def set_overlay(self, name: str, start_frame: int | None = None, samples: np.ndarray | None = None):
+        """Play ``samples`` instead of source ``name`` from ``start_frame`` on (a live
+        preview of new settings over the enhanced track). ``None`` removes it."""
+        with self._lock:
+            if samples is None:
+                self._overlay.pop(name, None)
+            else:
+                self._overlay[name] = (int(start_frame), samples)
 
     def has_source(self, name: str) -> bool:
         return self._buffers.get(name) is not None
@@ -99,6 +111,23 @@ class AudioPlayer(QObject):
     def toggle_source(self):
         self.set_active("enhanced" if self._active == "original" else "original")
 
+    # --- loop -----------------------------------------------------------------------
+    def set_loop(self, region: tuple[float, float] | None):
+        """Play ``(start, end)`` seconds over and over; ``None`` plays normally."""
+        with self._lock:
+            if region is None:
+                self._loop = None
+                return
+            a, b = sorted(region)
+            a, b = int(max(0.0, a) * self._sr), int(max(0.0, b) * self._sr)
+            self._loop = (a, b) if b - a >= int(0.05 * self._sr) else None
+            if self._loop and not (a <= self._pos < b):
+                self._pos = a  # start inside the loop
+
+    @property
+    def loop(self) -> tuple[float, float] | None:
+        return None if self._loop is None else (self._loop[0] / self._sr, self._loop[1] / self._sr)
+
     # --- transport ----------------------------------------------------------------
     @property
     def state(self) -> str:
@@ -126,6 +155,8 @@ class AudioPlayer(QObject):
             return
         if self._pos >= self._buffers[self._active].shape[0] - 1:
             self._pos = 0
+        if self._loop is not None and not (self._loop[0] <= self._pos < self._loop[1]):
+            self._pos = self._loop[0]
         try:
             if self._stream is not None and not self._stream.active:
                 self._close_stream()  # a stream that ran to the end cannot be restarted
@@ -172,6 +203,8 @@ class AudioPlayer(QObject):
         if buf is None:
             return
         self._pos = int(np.clip(seconds * self._sr, 0, buf.shape[0] - 1))
+        if self._loop is not None and not (self._loop[0] <= self._pos < self._loop[1]):
+            self._pos = self._loop[0]  # while looping, a click outside the loop restarts it
         self.positionChanged.emit(self.position)
 
     def shutdown(self):
@@ -208,16 +241,45 @@ class AudioPlayer(QObject):
             self._stream = None
 
     def _read(self, name: str, pos: int, frames: int) -> np.ndarray:
+        if self._loop is not None:
+            return self._read_loop(name, pos, frames)
+        return self._read_plain(name, pos, frames)
+
+    def _read_plain(self, name: str, pos: int, frames: int) -> np.ndarray:
         buf = self._buffers.get(name)
         out = np.zeros((frames, 2), dtype=np.float32)
         if buf is None or pos >= buf.shape[0]:
             return out
         chunk = np.asarray(buf[pos : pos + frames], dtype=np.float32)
+        ov = self._overlay.get(name)
+        if ov is not None:
+            o0, osamp = ov
+            lo, hi = max(pos, o0), min(pos + chunk.shape[0], o0 + osamp.shape[0])
+            if hi > lo:
+                chunk = chunk.copy()
+                chunk[lo - pos : hi - pos] = osamp[lo - o0 : hi - o0]
         if chunk.shape[1] == 1:
             out[: chunk.shape[0]] = chunk  # broadcast mono to both speakers
         else:
             out[: chunk.shape[0]] = chunk[:, :2]
         return out * self._gains[name]
+
+    def _read_loop(self, name: str, pos: int, frames: int) -> np.ndarray:
+        """``frames`` samples of the loop starting at ``pos``, wrapping at the loop end,
+        with a short fade at both ends of the loop."""
+        a, b = self._loop
+        idx = a + (pos - a + np.arange(frames)) % (b - a)
+        out = np.zeros((frames, 2), dtype=np.float32)
+        start = 0
+        while start < frames:  # contiguous runs between wraps
+            run_end = start + 1
+            while run_end < frames and idx[run_end] == idx[run_end - 1] + 1:
+                run_end += 1
+            out[start:run_end] = self._read_plain(name, int(idx[start]), run_end - start)
+            start = run_end
+        k = max(1, int(LOOP_FADE_S * self._sr))
+        env = np.minimum(np.clip((idx - a) / k, 0, 1), np.clip((b - 1 - idx) / k, 0, 1)).astype(np.float32)
+        return out * env[:, None]
 
     def _callback(self, outdata, frames, _time, _status):
         with self._lock:
@@ -235,6 +297,10 @@ class AudioPlayer(QObject):
             np.clip(data, -1.0, 1.0, out=data)
             outdata[:] = data
             buf = self._buffers.get(self._active)
+            if self._loop is not None:
+                a, b = self._loop
+                self._pos = a + (pos - a + frames) % (b - a)
+                return
             self._pos = pos + frames
             if buf is None or self._pos >= buf.shape[0]:
                 self._ended = True

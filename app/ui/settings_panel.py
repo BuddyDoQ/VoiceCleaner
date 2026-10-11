@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMenu,
                                QMessageBox, QPushButton, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget)
 
@@ -118,9 +118,21 @@ def db_fmt(v: float) -> str:
     return f"{v:+.1f} dB" if v else "0 dB"
 
 
+MAX_UNDO = 100
+UNDO_SETTLE_MS = 450  # a slider drag or a burst of clicks becomes one undo step
+
+FIELD_NAMES = {  # names for "Undo …" where the control has no slider label
+    "preset": "Preset", "smart": "Smart settings", "eq_gains": "EQ", "use_ai": "AI speech enhancement",
+    "normalize_loudness": "Normalize loudness", "pause_shorten": "Shorten long pauses",
+    "noise_reduction": "Noise Reduction", "speech_enhancement": "Speech Enhancement",
+    "room_reduction": "Room / Echo Reduction",
+}
+
+
 class SettingsPanel(QWidget):
     settingsChanged = Signal(object)
     downloadResynthRequested = Signal()
+    historyChanged = Signal()  # undo/redo availability or labels changed
 
     def __init__(self, initial: ProcessingSettings, smart: bool = True, advanced_open: bool = False, parent=None):
         super().__init__(parent)
@@ -139,6 +151,16 @@ class SettingsPanel(QWidget):
         sec.setProperty("role", "section")
         head.addWidget(sec)
         head.addStretch(1)
+        self.undo_btn, self.redo_btn = QToolButton(), QToolButton()
+        for b, text, fn in ((self.undo_btn, "\u21b6", self.undo), (self.redo_btn, "\u21b7", self.redo)):
+            b.setText(text)
+            b.setProperty("role", "link")
+            b.setStyleSheet("font-size: 13pt; padding: 0 3px;")
+            b.setCursor(Qt.PointingHandCursor)
+            b.setEnabled(False)
+            b.clicked.connect(fn)
+            head.addWidget(b)
+        head.addSpacing(4)
         self.modified_tag = QLabel("MODIFIED")
         self.modified_tag.setProperty("role", "tag")
         head.addWidget(self.modified_tag)
@@ -231,6 +253,16 @@ class SettingsPanel(QWidget):
         self.set_settings(initial)
         self._update_preset_desc()
         self._sync_smart_ui()
+        # undo history: snapshots of (settings, smart); _pos is the one on screen
+        self._history = [self._snapshot()]
+        self._pos = 0
+        self._restoring = False
+        self._settle = QTimer(self)
+        self._settle.setSingleShot(True)
+        self._settle.setInterval(UNDO_SETTLE_MS)
+        self._settle.timeout.connect(self._commit)
+        self.settingsChanged.connect(self._schedule_commit)
+        self._update_history_ui()
         if advanced_open:
             self.adv_button.setChecked(True)
 
@@ -451,6 +483,7 @@ class SettingsPanel(QWidget):
         self.analysis = analysis
         self._apply_smart()
         self._after_change()
+        self._rebase_history()  # what Smart set for this recording is not an undo step
         if analysis is not None:
             bits = []
             hp = choose_highpass(self.settings.lf_cleanup, analysis.lf_rumble_db, analysis.f0_low_hz)
@@ -491,6 +524,107 @@ class SettingsPanel(QWidget):
             self.use_ai.setToolTip("The AI model is not available. Traditional noise reduction is used.")
 
     # --- presets ---------------------------------------------------------------------------
+    # --- undo / redo -----------------------------------------------------------------------
+    def _snapshot(self) -> tuple:
+        return (self.settings.copy(), self.smart.isChecked())
+
+    @staticmethod
+    def _same(a: tuple, b: tuple) -> bool:
+        return a[1] == b[1] and a[0].to_dict() == b[0].to_dict()
+
+    def _schedule_commit(self, *_):
+        if not self._restoring:
+            self._settle.start()
+            self._update_history_ui()
+
+    def _commit(self):
+        snap = self._snapshot()
+        if self._same(snap, self._history[self._pos]):
+            return
+        del self._history[self._pos + 1:]  # a new change drops the redo steps
+        self._history.append(snap)
+        if len(self._history) > MAX_UNDO:
+            del self._history[0]
+        self._pos = len(self._history) - 1
+        self._update_history_ui()
+
+    def _rebase_history(self):
+        """Replace the current step with what is on screen (no new undo step)."""
+        self._settle.stop()
+        if hasattr(self, "_history"):
+            self._history[self._pos] = self._snapshot()
+            self._update_history_ui()
+
+    def can_undo(self) -> bool:
+        return self._pos > 0 or self._settle.isActive()
+
+    def can_redo(self) -> bool:
+        return self._pos < len(self._history) - 1 and not self._settle.isActive()
+
+    def undo(self):
+        if self._settle.isActive():  # a change still settling counts as the newest step
+            self._settle.stop()
+            self._commit()
+        if self._pos > 0:
+            self._go(self._pos - 1)
+
+    def redo(self):
+        if self.can_redo():
+            self._go(self._pos + 1)
+
+    def _go(self, pos: int):
+        self._pos = pos
+        settings, smart = self._history[pos]
+        self._restoring = True
+        try:
+            self.smart.blockSignals(True)
+            self.smart.setChecked(smart)
+            self.smart.blockSignals(False)
+            self.settings = settings.copy()
+            if self.settings.preset not in preset_names():
+                self.settings = self.settings.copy(preset=DEFAULT_PRESET)
+            self._populate_presets(self.settings.preset)
+            self._after_change()
+        finally:
+            self._restoring = False
+        self._update_history_ui()
+
+    def change_name(self, a: tuple, b: tuple) -> str:
+        """A short name for what differs between two snapshots, e.g. "Leveling"."""
+        if a[1] != b[1]:
+            return FIELD_NAMES["smart"]
+        da, db = a[0].to_dict(), b[0].to_dict()
+        if da["preset"] != db["preset"]:
+            return FIELD_NAMES["preset"]
+        changed = [k for k in da if da[k] != db[k] and k not in ("hum_removal", "highpass_hz", "quality_control")]
+        for k in changed:
+            if k in FIELD_NAMES:
+                return FIELD_NAMES[k]
+            if k in self._advanced:
+                return self._advanced[k].label.text()
+        return "settings" if not changed else changed[0].replace("_", " ")
+
+    def undo_text(self) -> str:
+        if self._settle.isActive():
+            return f"Undo {self.change_name(self._history[self._pos], self._snapshot())}"
+        if self._pos > 0:
+            return f"Undo {self.change_name(self._history[self._pos - 1], self._history[self._pos])}"
+        return "Undo"
+
+    def redo_text(self) -> str:
+        if self.can_redo():
+            return f"Redo {self.change_name(self._history[self._pos], self._history[self._pos + 1])}"
+        return "Redo"
+
+    def _update_history_ui(self):
+        if not hasattr(self, "_history"):
+            return
+        self.undo_btn.setEnabled(self.can_undo())
+        self.redo_btn.setEnabled(self.can_redo())
+        self.undo_btn.setToolTip(f"{self.undo_text()} (Ctrl+Z)")
+        self.redo_btn.setToolTip(f"{self.redo_text()} (Ctrl+Y)")
+        self.historyChanged.emit()
+
     def _populate_presets(self, select: str):
         self.preset.blockSignals(True)
         self.preset.clear()

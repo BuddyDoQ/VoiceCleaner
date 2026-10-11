@@ -9,6 +9,9 @@ if __package__ in (None, ""):  # allow `python app/main.py`
     __package__ = "app"
 
 
+SPLASH_MAX_S = 15.0  # longest the splash may hide the window on a slow first start
+
+
 def selftest(src: str, dst: str, preset: str = "Clean Voice") -> int:
     """Headless end-to-end check: VoiceCleaner.exe --selftest in.wav out.wav
 
@@ -84,11 +87,12 @@ def main() -> int:
         return list_inputs()
     if len(sys.argv) == 2 and sys.argv[1] == "--check-updates":
         return check_updates_cli()
-    from PySide6.QtCore import QEvent, QObject, Qt
+    # Only Qt, the theme and the splash are imported before the splash is on screen;
+    # everything heavy (NumPy, SciPy, the main window, the AI model) loads behind it.
+    from PySide6.QtCore import QEvent, QObject, Qt, QTimer
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     from app.ui import theme
-    from app.ui.main_window import MainWindow
     from app.utils.config import APP_NAME, UserConfig
     from app.utils.errors import friendly_message
     from app.utils.logging import get_logger, setup_logging
@@ -110,6 +114,11 @@ def main() -> int:
     config = UserConfig.load()
     theme.apply(app, config.extra.get("theme", "auto"))
 
+    from app.ui.splash import SplashScreen
+
+    splash = SplashScreen()
+    splash.start()
+
     def excepthook(exc_type, exc, tb):
         log.error("Unhandled exception", exc_info=(exc_type, exc, tb))
         title, message = friendly_message(exc)
@@ -120,12 +129,37 @@ def main() -> int:
 
     sys.excepthook = excepthook
 
+    # import in steps so the splash can repaint between them
+    splash.set_status("Loading audio engine…")
+    import numpy  # noqa: F401
+    import scipy.signal  # noqa: F401
+
+    splash.set_status("Loading interface…")
+    from app.ui.main_window import MainWindow
+
     window = MainWindow(config)
     try:  # follow Windows' light/dark setting live when the theme is "Automatic"
         app.styleHints().colorSchemeChanged.connect(window._system_scheme_changed)
     except AttributeError:
         pass
-    window.show()
+
+    # The window appears once the AI engine is ready (or failed), so it opens ready to
+    # work; a slow first start never keeps it hidden for more than SPLASH_MAX_S.
+    shown = False
+
+    def reveal():
+        nonlocal shown
+        if shown:
+            return
+        shown = True
+        window.show()
+        splash.finish(window)
+
+    window.engineStatus.connect(splash.set_status)
+    window.engineReady.connect(reveal)
+    QTimer.singleShot(int(SPLASH_MAX_S * 1000), reveal)
+    if window.engine_ready:
+        reveal()
 
     class _FinderOpen(QObject):
         """macOS delivers files opened from Finder (double-click, drop on the Dock icon)

@@ -16,7 +16,7 @@ buffers are disk-backed when the recording would not fit in memory.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -99,6 +99,49 @@ class _Progress:
     def check(self):
         if self.ctx is not None:
             self.ctx.check()
+
+
+PREVIEW_CONTEXT_S = 2.0  # audio processed on each side of a preview window, then dropped
+PREVIEW_XFADE_S = 0.03  # the preview is blended into the enhanced track over this length
+
+
+@dataclass
+class PreviewResult:
+    start_frame: int  # where ``samples`` belong in the recording
+    samples: np.ndarray  # includes PREVIEW_XFADE_S of margin at each end for blending
+    sample_rate: int
+    processing_seconds: float
+    window: tuple[float, float]  # the requested start/end (seconds)
+    settings: ProcessingSettings
+
+
+_profile_cache: dict = {}
+
+
+def preview_noise_profile(pipeline, audio: AudioData, work_full: np.ndarray, sr: int, analysis: AnalysisResult,
+                          s: ProcessingSettings, learned: NoiseProfile | None) -> NoiseProfile | None:
+    """The noise profile a full run would use (measured on the whole cleanup-filtered
+    recording), cached: it only depends on the recording and the cleanup filter."""
+    hp = s.highpass_hz or choose_highpass(s.lf_cleanup, analysis.lf_rumble_db, analysis.f0_low_hz)
+    hum = tuple(analysis.hum.harmonics) if (s.hum_removal and analysis.hum.detected) else ()
+    key = (id(audio.samples), audio.frames, round(hp, 1), hum, id(learned))
+    if key not in _profile_cache:
+        filtered = np.empty_like(work_full, dtype=np.float32)
+        CleanupFilter(sr, CleanupParams(highpass_hz=hp, hum_freqs=list(hum))).process(work_full, out=filtered)
+        _profile_cache.clear()  # one recording at a time
+        _profile_cache[key] = pipeline._noise_profile(filtered, sr, analysis, learned)
+    return _profile_cache[key]
+
+
+def slice_analysis(analysis: AnalysisResult, a: int, b: int, sr: int) -> AnalysisResult:
+    """The analysis of the whole recording, cut to frames ``a``..``b``: per-frame masks are
+    sliced and time ranges shifted; whole-file measurements (noise, hum, reverb) stay."""
+    f0, f1 = int(a / sr / FRAME_HOP_S), int(np.ceil(b / sr / FRAME_HOP_S))
+    t0, t1 = a / sr, b / sr
+    regions = [(max(x, t0) - t0, min(y, t1) - t0) for x, y in analysis.silence_regions if y > t0 and x < t1]
+    return replace(analysis, duration=t1 - t0, speech_mask=analysis.speech_mask[f0:f1],
+                   noise_mask=analysis.noise_mask[f0:f1], frame_level_db=analysis.frame_level_db[f0:f1],
+                   silence_regions=[(x, y) for x, y in regions if y - x > 0.05])
 
 
 class EnhancementPipeline:
@@ -185,6 +228,54 @@ class EnhancementPipeline:
                  elapsed, result.realtime_factor, attempt, result.stages, device_label)
         return result
 
+    # --- live preview --------------------------------------------------------------
+    def preview(self, audio: AudioData, analysis: AnalysisResult, settings: ProcessingSettings,
+                start_s: float, end_s: float, ctx=None, learned_profile: NoiseProfile | None = None,
+                context_s: float = PREVIEW_CONTEXT_S) -> "PreviewResult":
+        """Process only ``start_s``..``end_s`` (plus ``context_s`` either side so filters,
+        leveling and compression settle) to hear new settings within a second or two.
+
+        The window is treated as part of the whole recording: the noise profile comes from
+        the whole file and loudness is judged as for the whole file, so the window sounds
+        and measures (nearly) like the same passage of a full Enhance. Quality control is
+        file-wide and not run here."""
+        t0 = time.perf_counter()
+        sr, n = audio.sample_rate, audio.frames
+        a = max(0, int((start_s - context_s) * sr))
+        b = min(n, int((end_s + context_s) * sr))
+        core_a = max(0, int(start_s * sr) - int(PREVIEW_XFADE_S * sr))
+        core_b = min(n, int(end_s * sr) + int(PREVIEW_XFADE_S * sr))
+        s = settings.copy(quality_control=False)
+        steps = ["cleanup", "denoise", "ai", "dereverb", "eq", "dynamics", "loudness", "limiter"]
+        if s.resynthesis > 0.01:
+            steps.insert(4, "resynth")
+        prog = _Progress(ctx, steps)
+
+        work_full, _ = self._channel_input(audio, analysis)
+        profile = preview_noise_profile(self, audio, work_full, sr, analysis, s, learned_profile)
+        prog.check()
+        piece = np.ascontiguousarray(work_full[a:b], dtype=np.float32)
+        part = slice_analysis(analysis, a, b, sr)
+        restored, info = self._restore(piece, sr, part, s, learned_profile, prog, False, fixed_profile=profile)
+
+        channel_offset = 10 * np.log10(audio.channels / work_full.shape[1])
+        if s.normalize_loudness and analysis.speech_detected:
+            target = s.target_lufs - channel_offset
+        else:
+            target = (analysis.lufs if np.isfinite(analysis.lufs) else -23.0) - channel_offset
+        full_lufs = analysis.lufs
+        win_lufs = loudness.integrated_loudness(np.asarray(audio.samples[a:b], dtype=np.float32), sr)
+        offset = float(win_lufs - full_lufs) if np.isfinite(win_lufs) and np.isfinite(full_lufs) else 0.0
+        mastered = self._master(restored, sr, s, prog, False, target, part, loudness_offset_db=offset)
+        out = self._channel_output(mastered, audio.channels)[core_a - a : core_b - a]
+        if ctx is not None:
+            ctx.progress(1.0, "Preview ready")
+        elapsed = time.perf_counter() - t0
+        log.info("Preview %.1f-%.1f s in %.2f s (window offset %+.1f LU), stages=%s",
+                 start_s, end_s, elapsed, offset, info.get("stages"))
+        return PreviewResult(core_a, np.ascontiguousarray(out, dtype=np.float32), sr, elapsed,
+                             (start_s, end_s), settings)
+
     # --- channel layout ----------------------------------------------------------
     @staticmethod
     def _channel_input(audio: AudioData, analysis: AnalysisResult) -> tuple[np.ndarray, str]:
@@ -214,7 +305,8 @@ class EnhancementPipeline:
 
     # --- restoration ---------------------------------------------------------------
     def _restore(self, x: np.ndarray, sr: int, analysis: AnalysisResult, s: ProcessingSettings,
-                 learned: NoiseProfile | None, prog: _Progress, disk: bool) -> tuple[np.ndarray, dict]:
+                 learned: NoiseProfile | None, prog: _Progress, disk: bool,
+                 fixed_profile: NoiseProfile | None = None) -> tuple[np.ndarray, dict]:
         n, ch = x.shape
         info: dict = {"stages": [], "notes": []}
         chunk = int(self.chunk_seconds * sr)
@@ -238,7 +330,8 @@ class EnhancementPipeline:
         prog("denoise", 0.0, "Estimating noise...")
         ai_possible = s.use_ai and self.model_manager is not None and self.model_manager.available \
             and s.noise_reduction > 0.01
-        profile = self._noise_profile(cur, sr, analysis, learned)
+        # a preview passes the whole recording's profile: its pauses may lie outside the window
+        profile = fixed_profile or self._noise_profile(cur, sr, analysis, learned)
         info["profile"] = profile.describe() if profile else "none"
 
         # 3. profile denoiser
@@ -400,12 +493,15 @@ class EnhancementPipeline:
 
     # --- mastering ----------------------------------------------------------------------
     def _master(self, x: np.ndarray, sr: int, s: ProcessingSettings, prog: _Progress, disk: bool,
-                target: float, analysis: AnalysisResult) -> np.ndarray:
+                target: float, analysis: AnalysisResult, loudness_offset_db: float = 0.0) -> np.ndarray:
+        """``loudness_offset_db``: for a preview window, how much louder the window is than
+        the whole recording; loudness is then judged as for the whole file, so the window
+        gets the gain the full run would give it."""
         n, ch = x.shape
         step = 1 << 20
         prog("dynamics", 0.0, "Balancing levels...")
         y = allocate(n, ch, disk)
-        lufs = loudness.integrated_loudness(x, sr)
+        lufs = loudness.integrated_loudness(x, sr) - loudness_offset_db
         g = loudness.gain_to_target(lufs, target, max_gain_db=40.0)
         for a in range(0, n, step):
             y[a : a + step] = x[a : a + step] * g
@@ -426,7 +522,7 @@ class EnhancementPipeline:
         prog.check()
 
         prog("loudness", 0.0, "Normalizing loudness...")
-        lufs = loudness.integrated_loudness(y, sr)
+        lufs = loudness.integrated_loudness(y, sr) - loudness_offset_db
         g = loudness.gain_to_target(lufs, target, max_gain_db=40.0)
         for a in range(0, n, step):
             y[a : a + step] *= g
@@ -440,7 +536,7 @@ class EnhancementPipeline:
         limiter = TruePeakLimiter(sr, LimiterParams(ceiling_dbtp=s.peak_ceiling_dbtp))
         for i in range(3):
             limiter.process(y, out=z)
-            short = target - loudness.integrated_loudness(z, sr)
+            short = target - (loudness.integrated_loudness(z, sr) - loudness_offset_db)
             if short < 0.2 or not np.isfinite(short) or limiter.max_reduction_db < -12:
                 break
             g = 10 ** (min(short, 6.0) / 20)

@@ -69,10 +69,22 @@ def main():
     cp.list.setCurrentRow(2)
     cp.move_selected(-1)  # button/keyboard path: last take up one
     print("reordered:", [Path(p).name[-20:] for p in cp.paths()])
+    # the preview builds by itself once the edits pause; Play is then instant
+    t0 = time.time()
+    pump(app, lambda: cp.preview_ready, 10)
+    print(f"auto preview ready without pressing Play: {cp.preview_ready} ({time.time() - t0:.1f} s after the last edit)")
     cp.toggle_play()
-    pump(app, lambda: cp.compilation is not None)
+    print("play starts at once:", cp.player.state == "playing")
     pump(app, lambda: cp.player.state == "playing", 10)
     time.sleep(0.3)
+    # an edit during playback: it keeps playing and switches to the new version at the same take
+    playing_take = next(n for a, b, n in cp.compilation.segments if a <= cp.player.position < b)
+    cp.list.setCurrentRow(0)
+    cp.move_selected(1)
+    pump(app, lambda: cp.preview_ready, 10)
+    pos = cp.player.position
+    now_take = next((n for a, b, n in cp.compilation.segments if a <= pos < b), None)
+    print("edit while playing: still playing", cp.player.state == "playing", "| same take", now_take == playing_take)
     cp.player.stop()
     comp = cp.compilation
     print("compilation:", f"{comp.duration:.2f}s", [s[2][-20:] for s in comp.segments], f"removed {comp.removed_seconds:.2f}s")

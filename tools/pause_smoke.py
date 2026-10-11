@@ -115,7 +115,7 @@ def main():
         print(f"compile: {Path(p).name[-26:]}: {t.duration:.2f}s -> {t.final_duration:.2f}s, pauses {len(t.cuts)} "
               f"(-{t.pause_seconds:.2f}s)")
     cp.build()
-    pump(app, lambda: cp.compilation is not None)
+    pump(app, lambda: cp.preview_ready)
     print("compile: preview", cp.preview_state.text())
     w.grab().save(str(out / "pause_compile.png"))
     cp.pause_keep.setValue(0)

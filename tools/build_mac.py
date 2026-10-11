@@ -13,8 +13,8 @@ voice re-synthesis model (BigVGAN) is downloaded on demand into
 ~/Library/Application Support/VoiceCleaner/models the first time it is used.
 
 Without --sign the app is ad-hoc signed: it runs on any Mac, but Gatekeeper asks the
-user to confirm on first launch (right-click > Open, or System Settings > Privacy &
-Security > Open Anyway). With a "Developer ID Application" identity and a notarytool
+user to confirm on first launch (System Settings > Privacy & Security > Open Anyway; the
+right-click > Open shortcut no longer works on macOS 15). With a "Developer ID Application" identity and a notarytool
 keychain profile (xcrun notarytool store-credentials) it opens without warnings.
 
 --publish uploads the files to the existing GitHub release v<version> (or creates it)
@@ -139,9 +139,13 @@ loopback device. Microphone recording works; macOS asks for permission the first
 Files: preferences in `~/Library/Application Support/VoiceCleaner`, logs in
 `~/Library/Logs/VoiceCleaner`, sessions in `~/Documents/VoiceCleaner Sessions`.
 """
-UNSIGNED = """**First launch:** this build is not notarized by Apple. Right-click VoiceCleaner in
-Applications and choose **Open**, then **Open** again. (Or: System Settings > Privacy &
-Security > *Open Anyway*.) You only need to do this once.
+UNSIGNED = """**First launch:** this build is not notarized by Apple, so macOS blocks it the first time.
+1. Open VoiceCleaner from Applications. When macOS says it cannot verify it, click **Done**.
+2. Open **System Settings > Privacy & Security**, scroll down and click **Open Anyway**
+   next to the VoiceCleaner message, then confirm with your password.
+
+You only need to do this once. (On macOS 14 and earlier you can also right-click
+VoiceCleaner and choose **Open**; macOS 15 Sequoia removed that shortcut.)
 """
 
 

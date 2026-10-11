@@ -201,6 +201,10 @@ QPushButton:disabled {{ color: {FAINT}; background: {SURFACE}; border-color: {BO
 QPushButton[role="primary"] {{ background: {ACCENT}; color: {ACCENT_TEXT}; border: none; font-family: {mono}; font-weight: 500; font-size: 9.5pt; letter-spacing: 2px; padding: 11px 18px; border-radius: 4px; }}
 QPushButton[role="primary"]:hover {{ background: {ACCENT_DARK}; }}
 QPushButton[role="primary"]:disabled {{ background: {SURFACE_3}; color: {FAINT}; }}
+QPushButton[role="activity"] {{ background: {SURFACE_2}; border: 1px solid {ACCENT}; border-radius: 4px; padding: 5px 12px; color: {ACCENT}; font-family: {mono}; font-size: 8pt; }}
+QPushButton[role="activity"]:hover {{ background: {SURFACE_3}; }}
+QPushButton[role="toggle"] {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; padding: 7px 12px; font-family: {mono}; font-size: 8.5pt; letter-spacing: 1px; color: {MUTED}; }}
+QPushButton[role="toggle"]:checked {{ background: {ACCENT}; border-color: {ACCENT}; color: {ACCENT_TEXT}; }}
 QPushButton[role="ghost"] {{ background: transparent; border: none; color: {MUTED}; padding: 6px 8px; }}
 QPushButton[role="ghost"]:hover {{ color: {ACCENT}; }}
 QPushButton[role="outline"] {{ background: transparent; border: 1px solid {BORDER_STRONG}; font-family: {mono}; letter-spacing: 1px; }}

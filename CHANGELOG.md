@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.6
+
+- **Splash screen:** VoiceCleaner shows a splash immediately when it starts, with what it
+  is loading (audio engine, interface, AI model on the GPU). Before, nothing appeared for
+  several seconds. The window opens ready to work.
+- **See what is happening:**
+  - the step and percentage are shown on the waveform being processed;
+  - elapsed time and an estimate of the time left under the progress bar;
+  - a header chip shows the running job from any tab (click it to go there);
+  - busy tabs carry a badge, for example *BATCH · 3/10*;
+  - the Windows taskbar button shows the progress, and flashes when a long job finishes
+    while you are in another app.
+- **Compile: automatic preview.** The compilation updates by itself a moment after each
+  change, so *Play* starts at once. Changing the order while it plays keeps playing and
+  continues at the same take.
+- **Live preview of changes:** after the first Enhance, changing a setting re-processes about
+  10 seconds around the playhead (or your selection) within a second or two on a GPU, so you
+  hear the change right away. *Enhance Again* applies it to the whole recording; exporting
+  with changed settings asks first. On by default with an NVIDIA GPU.
+- **Loop** (`L`): repeat a selected passage (or the whole recording) while comparing A/B or
+  adjusting settings. Selections can now be made on either waveform.
+- **Undo / redo** for settings (`Ctrl+Z` / `Ctrl+Y`, or ↶ ↷ next to the preset).
+- macOS release notes: first-launch steps updated for macOS 15 Sequoia (*Open Anyway*).
+
 ## 1.0.5
 
 - **Update check on every start:** VoiceCleaner now checks for a newer version each time it

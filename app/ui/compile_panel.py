@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QPainter, QPen
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QListWidget,
                                QListWidgetItem, QPushButton, QSpinBox, QStyle, QStyledItemDelegate, QVBoxLayout,
@@ -198,9 +198,18 @@ class CompilePanel(QWidget):
         self.session = None
         self.takes: dict[str, Take] = {}
         self.compilation = None
+        self._stale = False  # the preview no longer matches the list (a rebuild is on its way)
+        self._generation = 0  # newest build wins; results of older builds are dropped
+        self._take_preview = False  # the player holds a single take, not the compilation
         self._populated_for = None
         self._preview_task = None
         self._load_task = None
+        self.activity = None  # the window's ActivityTracker, set by MainWindow
+        # rebuild the preview automatically once the user pauses: a burst of drags or
+        # option changes leads to one build, so Play is instant
+        self._rebuild_timer = QTimer(self)
+        self._rebuild_timer.setSingleShot(True)
+        self._rebuild_timer.timeout.connect(lambda: self.build())
         self.player = AudioPlayer(self)
         self.player.positionChanged.connect(self._on_position)
         self.player.stateChanged.connect(lambda s: self.play_btn.setText("❚❚" if s == "playing" else "▶"))
@@ -493,12 +502,21 @@ class CompilePanel(QWidget):
         return [self.takes[p] for p in self.paths() if p in self.takes]
 
     def _changed(self, *_):
-        """Order, takes or options changed: the preview no longer matches."""
+        """Order, takes or options changed: the preview no longer matches. It is rebuilt
+        automatically after a short pause; playback carries on with the old version and
+        switches to the new one at the same take when it is ready."""
         self.list.viewport().update()
-        self.player.stop()
-        self.compilation = None
-        self.wave.set_overview(None)
         takes = self._ordered_takes()
+        playing = self.player.state == "playing"
+        if not playing:
+            self.player.stop()
+        if not takes:
+            self.player.stop()
+            self.compilation = None
+            self.wave.set_overview(None)
+        self._stale = True
+        if takes:
+            self._rebuild_timer.start(self._rebuild_delay_ms(takes))
         n = self.list.count()
         self.empty_hint.setVisible(n == 0)
         self.export_btn.setEnabled(bool(takes))
@@ -510,47 +528,95 @@ class CompilePanel(QWidget):
                                  f"{format_duration(after)}")
         else:
             self.summary.setText("")
-        self.preview_state.setText("")
+        self.preview_state.setText("Updating preview\u2026" if takes else "")
+
+    @staticmethod
+    def _rebuild_delay_ms(takes: list[Take]) -> int:
+        """Wait a little longer for very long compilations, so dragging stays smooth."""
+        total = sum(t.final_duration for t in takes)
+        return 750 if total < 30 * 60 else 1500
 
     # --- preview & export -------------------------------------------------------------------
     def build(self, then=None):
+        """Build the preview now (in the background). ``then`` runs once it is ready."""
+        self._rebuild_timer.stop()
         takes = self._ordered_takes()
         if not takes:
             return
+        if self._preview_task is not None and self._preview_task.running:
+            self._preview_task.cancel()  # its result would be outdated anyway
+        self._generation += 1
+        gen = self._generation
         gap, level = self.gap.value(), self.level.isChecked()
+        key = "compile-preview"
+        if self.activity is not None:
+            self.activity.start(key, "Updating preview", self)
 
         def work(ctx):
             comp = assemble(takes, gap_ms=gap, match_loudness=level,
-                            progress=lambda f: ctx.progress(f, "Building compilation..."))
+                            progress=lambda f: (ctx.check(), ctx.progress(f, "Updating preview...")))
             return comp, WaveformOverview.compute(comp.samples, comp.sample_rate)
 
         def done(payload):
-            comp, ov = payload
-            self.compilation = comp
-            self.wave.set_overview(ov)
-            self.wave.highlight_regions = [(a, b) for i, (a, b, _n) in enumerate(comp.segments) if i % 2 == 0]
-            self.player.set_source("original", comp.samples, comp.sample_rate)
-            self.player.set_active("original")
-            msg = (f"{len(comp.segments)} takes • {format_duration(comp.duration)} • "
-                   f"{comp.removed_seconds:.1f} s of silence removed")
-            if comp.pause_seconds:
-                msg += f" ({comp.pause_seconds:.1f} s from long pauses)"
-            self.preview_state.setText(msg)
-            self.time_label.setText(f"0:00.0 / {format_duration(comp.duration)}")
+            if gen != self._generation:
+                return  # a newer build is on its way
+            if self.activity is not None:
+                self.activity.finish(key)
+            self._show_compilation(*payload)
             if then:
                 then()
 
-        self._preview_task = run_task(work, self, on_success=done,
-                                      on_error=lambda t, m, c: self.preview_state.setText("" if c else m),
-                                      on_progress=lambda f, m: self.preview_state.setText(m))
+        def failed(_title, message, cancelled):
+            if gen == self._generation:
+                if self.activity is not None:
+                    self.activity.finish(key, ok=False)
+                self.preview_state.setText("" if cancelled else message)
+
+        def progress(f, m):
+            if gen == self._generation:
+                self.preview_state.setText(m)
+                if self.activity is not None:
+                    self.activity.update(key, f, m)
+
+        self._preview_task = run_task(work, self, on_success=done, on_error=failed, on_progress=progress)
+
+    @property
+    def preview_ready(self) -> bool:
+        """The preview is built and matches the current list and options."""
+        return self.compilation is not None and not self._stale
+
+    def _show_compilation(self, comp, ov):
+        old, pos = self.compilation, self.player.position
+        playing = self.player.state == "playing" and not self._take_preview
+        self.compilation, self._stale = comp, False
+        self.wave.set_overview(ov)
+        self.wave.highlight_regions = [(a, b) for i, (a, b, _n) in enumerate(comp.segments) if i % 2 == 0]
+        msg = (f"{len(comp.segments)} takes • {format_duration(comp.duration)} • "
+               f"{comp.removed_seconds:.1f} s of silence removed")
+        if comp.pause_seconds:
+            msg += f" ({comp.pause_seconds:.1f} s from long pauses)"
+        self.preview_state.setText(msg)
+        if self._take_preview and self.player.state == "playing":
+            return  # a single take is playing: the new preview is used at the next Play
+        self._take_preview = False
+        self.player.set_source("original", comp.samples, comp.sample_rate)
+        self.player.set_active("original")
+        new_pos = map_position(old, comp, pos) if playing else 0.0
+        self.player.seek(new_pos)
+        self._on_position(new_pos)
 
     def toggle_play(self):
         if self.player.state == "playing":
             self.player.pause()
             return
-        if self.compilation is None:
-            self.build(then=self._play)
+        if self.compilation is None or self._stale:
+            self.build(then=self._play)  # do not wait for the timer
         else:
+            if self._take_preview:  # back from a single take to the compilation
+                self._take_preview = False
+                self.player.set_source("original", self.compilation.samples, self.compilation.sample_rate)
+                self.player.set_active("original")
+                self.player.seek(0)
             self._play()
 
     def _play(self):
@@ -565,7 +631,7 @@ class CompilePanel(QWidget):
         t = self.takes.get(path)
         if t is None or t.silent:
             return
-        self.compilation = None
+        self._take_preview = True
         self.player.set_source("original", t.samples[t.start:t.end], t.sample_rate)
         self.player.set_active("original")
         self.player.seek(0)
@@ -574,16 +640,32 @@ class CompilePanel(QWidget):
 
     def _on_position(self, s: float):
         self.wave.set_playhead(s)
-        total = self.compilation.duration if self.compilation else 0.0
+        total = self.player.duration if self._take_preview else (self.compilation.duration if self.compilation else 0.0)
         self.time_label.setText(f"{format_duration(s)} / {format_duration(total)}")
 
     def export(self):
         name = f"{self.session.name} - Compilation" if self.session else "Compilation"
-        if self.compilation is None:
+        if self.compilation is None or self._stale:
             self.build(then=lambda: self.exportRequested.emit(self.compilation, name))
         else:
             self.exportRequested.emit(self.compilation, name)
 
     def shutdown(self):
+        self._rebuild_timer.stop()
         self.player.shutdown()
+
+
+def map_position(old, new, pos: float) -> float:
+    """Where ``pos`` (seconds in compilation ``old``) lands in ``new``: the same point of
+    the same take if it is still there, otherwise the same time, clamped."""
+    if new is None:
+        return 0.0
+    if old is not None:
+        for a, b, name in old.segments:
+            if a <= pos < b:
+                for a2, b2, name2 in new.segments:
+                    if name2 == name:
+                        return min(a2 + (pos - a), max(a2, b2 - 0.01))
+                break
+    return max(0.0, min(pos, new.duration - 0.01))
 

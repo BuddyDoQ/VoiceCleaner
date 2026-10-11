@@ -1,8 +1,10 @@
 """Waveform display with playhead, click-to-seek, zoom and region selection."""
 from __future__ import annotations
 
+import time
+
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -43,6 +45,21 @@ class WaveformOverview:
             rms[i : i + blocks.shape[0]] = np.sqrt(np.mean(blocks * blocks, axis=1))
         return cls(mins, maxs, rms, sr, n)
 
+    def patched(self, start_frame: int, samples: np.ndarray, base: np.ndarray) -> "WaveformOverview":
+        """A copy with ``samples`` (laid over ``base`` from ``start_frame``) redrawn; only
+        the bins it touches are recomputed, so this is cheap for long recordings."""
+        b0 = start_frame // OVERVIEW_BLOCK
+        b1 = min(self.mins.shape[0], -(-(start_frame + samples.shape[0]) // OVERVIEW_BLOCK))
+        seg = np.array(base[b0 * OVERVIEW_BLOCK : b1 * OVERVIEW_BLOCK], dtype=np.float32)
+        off = start_frame - b0 * OVERVIEW_BLOCK
+        n = min(samples.shape[0], seg.shape[0] - off)
+        seg[off : off + n] = samples[:n]
+        part = WaveformOverview.compute(seg, self.sr)
+        mins, maxs, rms = self.mins.copy(), self.maxs.copy(), self.rms.copy()
+        k = min(b1 - b0, part.mins.shape[0])
+        mins[b0 : b0 + k], maxs[b0 : b0 + k], rms[b0 : b0 + k] = part.mins[:k], part.maxs[:k], part.rms[:k]
+        return WaveformOverview(mins, maxs, rms, self.sr, self.frames)
+
     def columns(self, t0: float, t1: float, width: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         b0 = int(np.clip(t0 * self.sr / OVERVIEW_BLOCK, 0, self.mins.shape[0]))
         b1 = int(np.clip(np.ceil(t1 * self.sr / OVERVIEW_BLOCK), b0 + 1, self.mins.shape[0]))
@@ -73,8 +90,15 @@ class WaveformView(QWidget):
         self.playhead: float = 0.0
         self.selection: tuple[float, float] | None = None
         self.highlight_regions: list[tuple[float, float]] = []
+        self.loop_region: tuple[float, float] | None = None  # drawn as a looped passage
+        self.preview_region: tuple[float, float] | None = None  # live preview of new settings
         self.active = False
         self.busy_text = ""
+        self.busy_fraction: float | None = None  # progress shown with busy_text (None = no bar)
+        self._busy_t0 = 0.0
+        self._busy_timer = QTimer(self)  # animates the "working" sweep
+        self._busy_timer.setInterval(33)
+        self._busy_timer.timeout.connect(self.update)
         self.live: tuple[WaveformOverview, float] | None = None  # recording in progress, offset (s)
         self.t0, self.t1 = 0.0, 1.0
         self._drag_start: float | None = None
@@ -124,8 +148,17 @@ class WaveformView(QWidget):
             d = max(d, self.live[1] + self.live[0].duration, self.t1)
         return d
 
-    def set_busy(self, text: str):
+    def set_busy(self, text: str, fraction: float | None = None):
+        """Show that this track is being worked on: ``text`` (e.g. the processing step)
+        with a progress bar when ``fraction`` is given, and a moving sweep either way."""
+        if text and not self.busy_text:
+            self._busy_t0 = time.monotonic()
         self.busy_text = text
+        self.busy_fraction = fraction if text else None
+        if text and not self._busy_timer.isActive():
+            self._busy_timer.start()
+        elif not text:
+            self._busy_timer.stop()
         self.update()
 
     def set_view(self, t0: float, t1: float):
@@ -167,13 +200,38 @@ class WaveformView(QWidget):
         if self.overview is None:
             p.setPen(QPen(theme.qcolor(theme.BORDER), 1, Qt.DashLine))
             p.drawLine(QPointF(r.left(), mid), QPointF(r.right(), mid))
+            if self.busy_text:
+                self._draw_busy(p, r, dim=False)
+                return
             p.setPen(theme.qcolor(theme.FAINT))
             f = QFont(self.font())
             f.setPointSizeF(10.5)
             p.setFont(f)
-            p.drawText(r, Qt.AlignCenter, self.busy_text or self.placeholder)
+            p.drawText(r, Qt.AlignCenter, self.placeholder)
             return
 
+        # live preview: this part already reflects the new settings
+        if self.preview_region:
+            a, b = self.preview_region
+            xa, xb = max(r.left(), self._t_to_x(a)), min(r.right(), self._t_to_x(b))
+            if xb > xa:
+                p.fillRect(QRectF(xa, r.top(), xb - xa, r.height()), theme.qcolor(theme.SUCCESS, 18))
+                p.fillRect(QRectF(xa, r.top() - 6, xb - xa, 3), theme.qcolor(theme.SUCCESS, 200))
+                f = QFont(self.font())
+                f.setPointSizeF(7.5)
+                p.setFont(f)
+                p.setPen(theme.qcolor(theme.SUCCESS))
+                p.drawText(QRectF(xa + 4, r.top() - 3, max(60.0, xb - xa), 14), Qt.AlignLeft | Qt.AlignTop,
+                           "LIVE PREVIEW")
+        # loop: accent edges so it is clear what repeats
+        if self.loop_region:
+            a, b = self.loop_region
+            xa, xb = self._t_to_x(a), self._t_to_x(b)
+            p.fillRect(QRectF(xa, r.top(), xb - xa, r.height()), theme.qcolor(theme.ACCENT, 22))
+            p.setPen(QPen(theme.qcolor(theme.ACCENT, 220), 2))
+            for x in (xa, xb):
+                if r.left() <= x <= r.right():
+                    p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()))
         # selection
         if self.selection:
             a, b = self.selection
@@ -246,9 +304,37 @@ class WaveformView(QWidget):
             p.drawLine(QPointF(self._hover_x, r.top()), QPointF(self._hover_x, r.bottom()))
 
         if self.busy_text:
-            p.fillRect(self.rect(), theme.qcolor(theme.SURFACE, 190))
-            p.setPen(theme.qcolor(theme.TEXT))
-            p.drawText(self.rect(), Qt.AlignCenter, self.busy_text)
+            self._draw_busy(p, r, dim=True)
+
+    def _draw_busy(self, p: QPainter, r: QRectF, dim: bool):
+        """Step text, percentage, progress bar and a sweep that keeps moving."""
+        if dim:
+            p.fillRect(self.rect(), theme.qcolor(theme.SURFACE, 200))
+        # sweep: a soft band gliding across the track
+        phase = ((time.monotonic() - self._busy_t0) / 1.6) % 1.0
+        band = r.width() * 0.22
+        x = r.left() - band + (r.width() + band) * phase
+        grad = QLinearGradient(x, 0, x + band, 0)
+        c0, c1 = theme.qcolor(theme.ACCENT, 0), theme.qcolor(theme.ACCENT, 46)
+        grad.setColorAt(0, c0)
+        grad.setColorAt(0.5, c1)
+        grad.setColorAt(1, c0)
+        p.fillRect(QRectF(max(r.left(), x), r.top(), min(band, r.right() - x), r.height()), grad)
+        mid = r.center().y()
+        f = QFont(self.font())
+        f.setPointSizeF(10.5)
+        p.setFont(f)
+        p.setPen(theme.qcolor(theme.TEXT))
+        text = self.busy_text
+        if self.busy_fraction is not None:
+            text = f"{text.rstrip('.').rstrip(chr(0x2026))}  ·  {self.busy_fraction * 100:.0f}%"
+        p.drawText(QRectF(r.left(), mid - 26, r.width(), 22), Qt.AlignCenter, text)
+        if self.busy_fraction is not None:
+            bw = min(320.0, r.width() * 0.6)
+            track = QRectF(r.center().x() - bw / 2, mid + 4, bw, 4)
+            p.fillRect(track, theme.qcolor(theme.SURFACE_3))
+            p.fillRect(QRectF(track.left(), track.top(), track.width() * self.busy_fraction, track.height()),
+                       theme.qcolor(theme.ACCENT))
 
     def _draw_live(self, p: QPainter, r: QRectF):
         ov, offset = self.live

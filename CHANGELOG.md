@@ -11,6 +11,7 @@
   about 5 s with Voice Re-synthesis).
 - **Fixed:** in light mode the playhead on the track being played was white, so it could not be
   seen. It is now dark in light mode (still white in dark mode).
+- **Fixed (Mac):** the start screen's description was cut off at the top and bottom.
 
 ## 1.0.7
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
                                QWidget)
@@ -59,6 +59,28 @@ def card() -> QFrame:
     return f
 
 
+class _FitWrappedHeight(QObject):
+    """Keeps a word-wrapped label tall enough for all of its lines."""
+
+    EVENTS = (QEvent.Show, QEvent.Resize, QEvent.FontChange, QEvent.StyleChange, QEvent.Polish)
+
+    def eventFilter(self, obj, event):
+        if event.type() in self.EVENTS and obj.width() > 0:
+            need = obj.heightForWidth(obj.width())
+            if need > 0 and obj.minimumHeight() != need:
+                obj.setMinimumHeight(need)
+        return False
+
+
+def keep_all_lines(lbl: QLabel) -> QLabel:
+    """A wrapped label's minimum height measured once, when it is built, uses the font it
+    has then, before the stylesheet and app font apply; with a different final font (as on
+    macOS) a line is cut off. Re-measure whenever font, style or width change instead."""
+    lbl.installEventFilter(_FitWrappedHeight(lbl))
+    lbl.setMinimumHeight(lbl.heightForWidth(max(1, lbl.width())))
+    return lbl
+
+
 class DropZone(QFrame):
     """Large dashed drop target shown before a file is loaded."""
 
@@ -86,7 +108,7 @@ class DropZone(QFrame):
                     "muted", wrap=True)
         sub.setAlignment(Qt.AlignCenter)
         sub.setFixedWidth(460)
-        sub.setMinimumHeight(sub.heightForWidth(460))  # wrapped text keeps all its lines
+        keep_all_lines(sub)  # wrapped text keeps all its lines, whatever font it ends up with
         lay.addWidget(sub, alignment=Qt.AlignCenter)
         btn = QPushButton("Choose WAV File")
         btn.setProperty("role", "primary")

@@ -384,6 +384,8 @@ class SettingsPanel(QWidget):
         elif not installed:
             self.resynth_status.setText("The re-synthesis model is not installed yet. It is downloaded once from "
                                         "NVIDIA's official repository and then works offline.")
+        elif device_kind == "mps":
+            self.resynth_status.setText("Runs on the Apple GPU: about 3x real-time.")
         elif device_kind != "cuda":
             self.resynth_status.setText("Runs on the CPU here: about real-time speed, so long recordings take a while.")
         else:

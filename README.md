@@ -47,7 +47,9 @@ and `.zip`. Add `--sign "Developer ID Application: …" --notarize <profile>` fo
 build that opens without a Gatekeeper warning, and `--publish` to upload it to the GitHub
 release. On macOS:
 
-* processing runs on the CPU (about 30x realtime on Apple Silicon);
+* noise reduction runs on the CPU (about 30x realtime on Apple Silicon, faster than on the
+  Apple GPU for this small model), and voice re-synthesis runs on the Apple GPU (about 3x
+  realtime instead of 0.6x on the CPU; *CPU only* in the menu turns this off);
 * desktop-audio (loopback) recording is unavailable because macOS has no system loopback
   device; microphone recording works, and macOS asks for permission the first time;
 * preferences and downloaded models live in `~/Library/Application Support/VoiceCleaner`,
@@ -161,7 +163,8 @@ The guiding rule is *better speech, not obviously processed speech*.
   you stop adjusting. The previewed part is marked *LIVE PREVIEW* on the Enhanced track
   and plays at the level a full Enhance would give it. *Enhance Again* applies the
   settings to the whole recording; exporting first asks whether to do that. On by
-  default with an NVIDIA GPU (about a second per preview); it can be turned on for CPUs
+  default with an NVIDIA GPU (about a second per preview) and on Apple Silicon Macs (under
+  half a second, or about 5 s with Voice Re-synthesis); it can be turned on for other CPUs
   too, where it is slower.
 * **Undo / redo** settings changes with `Ctrl+Z` / `Ctrl+Y` or the ↶ ↷ buttons next to
   the preset. A slider drag is one step; the tooltip names the change.

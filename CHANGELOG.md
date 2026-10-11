@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.8
+
+- **Mac: voice re-synthesis on the Apple GPU.** On Apple Silicon Macs, Voice Re-synthesis now
+  runs on the GPU, about 5x faster (a 20 s recording with re-synthesis: 9 s instead of 36 s).
+  The result is the same as on the CPU. Noise reduction stays on the CPU, where it is faster.
+  - The header shows *CPU + GPU*; *CPU only* in the menu (⋯ > Processing device) turns the
+    GPU off. If the GPU ever fails, that part is redone on the CPU automatically.
+- **Mac: live preview is on by default on Apple Silicon** (under half a second per preview,
+  about 5 s with Voice Re-synthesis).
+
 ## 1.0.7
 
 - **Batch tab shows the settings:** the settings sidebar (preset, Smart, sliders, EQ,

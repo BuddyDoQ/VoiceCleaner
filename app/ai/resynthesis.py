@@ -16,6 +16,7 @@ import contextlib
 import io
 import json
 import threading
+import warnings
 from math import gcd
 from pathlib import Path
 
@@ -27,6 +28,11 @@ from ..utils.errors import ModelUnavailableError, ProcessingError
 from ..utils.logging import get_logger
 
 log = get_logger("resynthesis")
+
+# PyTorch's STFT on the Apple GPU (MPS) warns that it resized an internal output on every
+# call; the result is correct (identical to the CPU), so keep it out of the log and console.
+warnings.filterwarnings("ignore", message="An output with one or more elements was resized",
+                        category=UserWarning)
 
 CHUNK_S = 10.0
 OVERLAP_S = 0.5
@@ -131,6 +137,8 @@ class BigVGANResynthesizer:
             self._model = None
             if self._torch is not None and self.device.startswith("cuda"):
                 self._torch.cuda.empty_cache()
+            elif self._torch is not None and self.device == "mps":
+                self._torch.mps.empty_cache()
 
     # --- core ---------------------------------------------------------------------
     def log_mel(self, y):
@@ -176,10 +184,18 @@ class Resynthesis:
             try:
                 v = model.vocode(y)
             except Exception as exc:
-                if self.manager.device.kind == "cuda" and "cuda" in f"{exc}".lower() + type(exc).__name__.lower():
+                dev = self.manager.resynth_device.kind
+                cuda_error = dev == "cuda" and "cuda" in f"{exc}".lower() + type(exc).__name__.lower()
+                # NVIDIA: CUDA errors only (as before). Apple GPU: any failure, since Metal
+                # errors do not name themselves consistently; the CPU result is identical.
+                if cuda_error or dev == "mps":
                     log.warning("GPU re-synthesis failed (%s); retrying on CPU", exc)
                     self.manager.resynth_fallback_to_cpu()
-                    v = self.manager.get_resynthesizer().vocode(y)
+                    try:
+                        v = self.manager.get_resynthesizer().vocode(y)
+                    except Exception as exc2:
+                        log.exception("Re-synthesis failed on the CPU too")
+                        raise ProcessingError("Voice re-synthesis failed for this recording.") from exc2
                 else:
                     log.exception("Re-synthesis failed")
                     raise ProcessingError("Voice re-synthesis failed for this recording.") from exc

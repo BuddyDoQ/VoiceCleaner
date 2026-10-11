@@ -216,6 +216,9 @@ class EnhancementPipeline:
         if ctx is not None:
             ctx.progress(1.0, "Done")
         device_label = self.model_manager.device.label if (self.model_manager and restore_info.get("ai")) else "CPU (DSP)"
+        if (self.model_manager and settings.resynthesis > 0.01
+                and self.model_manager.resynth_device != self.model_manager.device):
+            device_label += f" + {self.model_manager.resynth_device.label} (re-synthesis)"
         result = PipelineResult(
             samples=output, sample_rate=sr, settings=settings,
             original_metrics=original_metrics, enhanced_metrics=enhanced_metrics, qc=qc_report,

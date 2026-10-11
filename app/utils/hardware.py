@@ -14,15 +14,21 @@ log = get_logger("hardware")
 
 @dataclass(frozen=True)
 class DeviceInfo:
-    kind: str  # "cpu" or "cuda"
-    torch_device: str  # e.g. "cpu", "cuda:0"
+    kind: str  # "cpu", "cuda" (NVIDIA) or "mps" (Apple Silicon GPU)
+    torch_device: str  # e.g. "cpu", "cuda:0", "mps"
     name: str  # human readable
 
     @property
     def label(self) -> str:
         if self.kind == "cuda":
             return f"NVIDIA GPU ({self.name.removeprefix('NVIDIA ').strip()})"
+        if self.kind == "mps":
+            return f"Apple GPU ({self.name})"
         return f"CPU ({self.name})"
+
+    @property
+    def is_gpu(self) -> bool:
+        return self.kind in ("cuda", "mps")
 
 
 @lru_cache(maxsize=1)
@@ -61,6 +67,33 @@ def cuda_device() -> DeviceInfo | None:
     except Exception as exc:  # broken driver, unsupported arch, ...
         log.warning("CUDA present but unusable: %s", exc)
     return None
+
+
+@lru_cache(maxsize=1)
+def mps_device() -> DeviceInfo | None:
+    """The Apple Silicon GPU through PyTorch's Metal (MPS) backend, or None."""
+    import sys
+
+    if sys.platform != "darwin":
+        return None
+    try:
+        import torch
+
+        if torch.backends.mps.is_available():
+            torch.zeros(1, device="mps").add_(1).item()  # make sure kernels actually run
+            return DeviceInfo("mps", "mps", cpu_name())
+    except Exception as exc:
+        log.warning("Apple GPU present but unusable: %s", exc)
+    return None
+
+
+def select_resynth_device(preference: str, main: DeviceInfo) -> DeviceInfo:
+    """Device for voice re-synthesis (BigVGAN). It follows the main device, except that on
+    Apple Silicon it uses the GPU while noise reduction stays on the CPU: measured on an
+    M-series Mac, BigVGAN is ~5x faster on the GPU, DeepFilterNet ~2.5x slower."""
+    if main.kind == "cuda" or preference == "cpu":
+        return main
+    return mps_device() or main
 
 
 def select_device(preference: str = "auto") -> DeviceInfo:

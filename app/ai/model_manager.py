@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from ..utils.config import model_path
 from ..utils.errors import ModelUnavailableError
-from ..utils.hardware import DeviceInfo, select_device
+from ..utils.hardware import DeviceInfo, select_device, select_resynth_device
 from ..utils.logging import get_logger
 from .enhancement_model import DeepFilterNet3, EnhancementModel
 from .resynthesis import BigVGANResynthesizer
@@ -56,7 +56,7 @@ class ModelManager:
         self.model.device = self.device.torch_device
         self.error = ""
         self.resynth = BigVGANResynthesizer(model_path(RESYNTH_FOLDER, "bigvgan_generator.pt"))
-        self.resynth_device = self.device
+        self.resynth_device = select_resynth_device(device_preference, self.device)
 
     def status(self) -> ModelStatus:
         return ModelStatus(self.model.key, self.model.display_name, self.model.is_installed(),
@@ -74,10 +74,12 @@ class ModelManager:
             new_device = select_device(preference)
             if new_device != self.device:
                 self.model.unload()
-                self.resynth.unload()
                 self.device = new_device
-                self.resynth_device = new_device
                 self.model.device = new_device.torch_device
+            new_resynth = select_resynth_device(preference, new_device)
+            if new_resynth != self.resynth_device:
+                self.resynth.unload()
+                self.resynth_device = new_resynth
 
     def get(self) -> EnhancementModel:
         """Return the loaded model, loading it on first use."""
@@ -126,7 +128,7 @@ class ModelManager:
                     raise
                 except Exception as exc:
                     log.exception("Re-synthesis model load failed")
-                    if self.resynth_device.kind == "cuda":
+                    if self.resynth_device.is_gpu:
                         self.resynth_fallback_to_cpu()
                         self.resynth.load("cpu")
                     else:

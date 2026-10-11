@@ -6,6 +6,7 @@ All heavy work runs on background threads; the window only reacts to results.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -251,7 +252,11 @@ class MainWindow(QMainWindow):
         dev = m.addMenu("Processing device")
         group = QActionGroup(self)
         self.device_actions = {}
-        for key, text in (("auto", "Automatic (GPU if available)"), ("cpu", "CPU only"), ("cuda", "NVIDIA GPU")):
+        if sys.platform == "darwin":  # no NVIDIA GPUs on a Mac; the Apple GPU runs re-synthesis
+            choices = (("auto", "Automatic (Apple GPU for re-synthesis)"), ("cpu", "CPU only"))
+        else:
+            choices = (("auto", "Automatic (GPU if available)"), ("cpu", "CPU only"), ("cuda", "NVIDIA GPU"))
+        for key, text in choices:
             a = QAction(text, self, checkable=True)
             a.setChecked(self.config.device_preference == key)
             a.triggered.connect(lambda _=False, k=key: self._set_device(k))
@@ -575,7 +580,8 @@ class MainWindow(QMainWindow):
         self.live_box.setToolTip(
             "After the first Enhance, changing a setting re-processes about 10 seconds around the\n"
             "playhead (or your selection) within a second or two, so you hear the change right away.\n"
-            "Enhance again to apply it to the whole recording. Fast with an NVIDIA GPU; slower on a CPU.")
+            "Enhance again to apply it to the whole recording. Fast with an NVIDIA GPU or on Apple\n"
+            "Silicon; slower on other CPUs and with Voice Re-synthesis.")
         live = self.config.extra.get("live_preview")
         self.live_box.setChecked(bool(live) if live is not None else False)  # default set once the device is known
         self.live_box.toggled.connect(self._live_toggled)
@@ -741,7 +747,8 @@ class MainWindow(QMainWindow):
             self._update_engine_chips()
             if self.config.extra.get("live_preview") is None:  # first run: on where it is fast
                 self.live_box.blockSignals(True)
-                self.live_box.setChecked(mm.device.kind == "cuda")
+                # fast with an NVIDIA GPU, and on Apple Silicon (~0.4 s per preview on an M-series CPU)
+                self.live_box.setChecked(mm.device.kind == "cuda" or mm.resynth_device.kind == "mps")
                 self.live_box.blockSignals(False)
             self.engineStatus.emit("Ready")
             self.engineReady.emit()
@@ -770,6 +777,11 @@ class MainWindow(QMainWindow):
         dev_name = st.device.name.removeprefix("NVIDIA ").removeprefix("GeForce ")
         self.device_chip.setText(f"{'GPU' if st.device.kind == 'cuda' else 'CPU'} · {dev_name}")
         self.device_chip.setToolTip(f"Processing device: {st.device.label}\nChange it in the menu (⋯).")
+        if mm.resynth_device.kind == "mps":  # Apple Silicon: noise reduction on the CPU, re-synthesis on the GPU
+            self.device_chip.setText(f"CPU + GPU · {dev_name}")
+            self.device_chip.setToolTip(
+                f"Noise reduction: {st.device.label}, the fastest for this model\n"
+                f"Voice re-synthesis: {mm.resynth_device.label}\nChange it in the menu (⋯).")
         if st.device.kind != "cuda" and edition() == "standard":
             from ..utils.hardware import nvidia_gpu_name
 
@@ -783,7 +795,7 @@ class MainWindow(QMainWindow):
             self.model_chip.setText(f"AI · {st.name}")
             self.model_chip.setToolTip(f"{st.name} • license {mm.model.license}\n{mm.model.homepage}")
             self.settings_panel.set_ai_available(True)
-        self.settings_panel.set_resynth_status(mm.resynth_available, mm.device.kind)
+        self.settings_panel.set_resynth_status(mm.resynth_available, mm.resynth_device.kind)
         if not (st.installed and not st.error):
             self.model_chip.setText("AI model: not installed")
             self.model_chip.setProperty("tone", "warning")
@@ -1285,7 +1297,7 @@ class MainWindow(QMainWindow):
             self._busy(False, "Voice re-synthesis model installed.")
             if self.model_manager is not None:
                 self.model_manager.refresh_model_paths()
-                self.settings_panel.set_resynth_status(True, self.model_manager.device.kind)
+                self.settings_panel.set_resynth_status(True, self.model_manager.resynth_device.kind)
 
         self._busy(True, "Downloading voice model...")
         self.task = run_task(work, self, on_success=done, on_error=self._task_failed, on_progress=self._on_progress)

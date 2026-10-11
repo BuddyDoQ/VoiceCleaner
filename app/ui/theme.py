@@ -19,13 +19,14 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 ASSETS = Path(__file__).resolve().parent / "assets"
 
 NIGHT = {
-    "BG": "#080810",  # --bg
-    "BG_ALT": "#0e0e1a",  # --bg-alt (sidebar, header)
-    "SURFACE": "#121220",  # --bg-card
-    "SURFACE_2": "#1a1a2e",  # --bg-inset (inputs, inset panels)
-    "SURFACE_3": "#262640",  # hover / tracks
-    "BORDER": "#1f1f2d",  # --border (7 % white on bg)
-    "BORDER_STRONG": "#30303f",  # --border-strong
+    # panels a step lighter than the page, with clearer borders, so sections stand out
+    "BG": "#07070e",  # --bg
+    "BG_ALT": "#10101e",  # --bg-alt (sidebar, header)
+    "SURFACE": "#171729",  # --bg-card
+    "SURFACE_2": "#20203a",  # --bg-inset (inputs, inset panels)
+    "SURFACE_3": "#2c2c4a",  # hover / tracks
+    "BORDER": "#2a2a3e",  # --border
+    "BORDER_STRONG": "#3b3b52",  # --border-strong
     "TEXT": "#eeeef8",  # --text-primary
     "MUTED": "#b8b8d0",  # --text-secondary
     "FAINT": "#6e6e8a",  # --text-muted
@@ -183,7 +184,8 @@ QLabel[role="eqvalue"][active="true"] {{ color: {ACCENT}; }}
 QLabel[role="eqfreq"] {{ color: {MUTED}; font-family: {mono}; font-size: 7.5pt; }}
 QLabel[role="eqname"] {{ color: {FAINT}; font-size: 7pt; }}
 QLabel[role="tag"] {{ font-family: {mono}; font-size: 7.5pt; letter-spacing: 1px; color: {WARNING}; }}
-QLabel[role="smartnote"] {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-left: 3px solid {ACCENT}; border-radius: 4px; padding: 6px 8px; color: {MUTED}; font-size: 8.5pt; }}
+QFrame[role="smartnote"] {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-left: 3px solid {ACCENT}; border-radius: 4px; }}
+QLabel[role="smartnotetext"] {{ background: transparent; border: none; color: {MUTED}; font-size: 8.5pt; }}
 QLabel[auto="true"] {{ color: {ACCENT}; font-family: {mono}; font-size: 8pt; }}
 
 QFrame[role="card"] {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 10px; }}
@@ -249,6 +251,8 @@ QComboBox::drop-down {{ border: none; width: 22px; }}
 QSpinBox, QDoubleSpinBox {{ font-family: {mono}; }}
 QComboBox QAbstractItemView {{ background: {SURFACE}; border: 1px solid {BORDER_STRONG}; selection-background-color: {SURFACE_3}; selection-color: {TEXT}; outline: none; padding: 4px; }}
 
+QSlider:horizontal {{ min-height: 20px; }}
+QSlider:vertical {{ min-width: 18px; }}
 QSlider::groove:horizontal {{ height: 4px; background: {SURFACE_3}; border-radius: 2px; }}
 QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }}
 QSlider::handle:horizontal {{ background: {TEXT}; width: 16px; height: 16px; margin: -6px 0; border-radius: 8px; }}
@@ -277,9 +281,10 @@ QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
 QScrollBar::handle:horizontal {{ background: {SURFACE_3}; border-radius: 4px; min-width: 30px; }}
 
 QTabWidget::pane {{ border: none; }}
-QTabBar::tab {{ background: transparent; color: {FAINT}; padding: 10px 18px; border: none; border-bottom: 2px solid transparent; font-family: {mono}; font-size: 8.5pt; letter-spacing: 2px; }}
-QTabBar::tab:selected {{ color: {TEXT}; border-bottom: 2px solid {ACCENT}; }}
-QTabBar::tab:hover {{ color: {TEXT}; }}
+QTabBar::tab {{ background: {SURFACE_2}; color: {MUTED}; padding: 8px 20px; margin: 8px 6px 0 0; border: 1px solid {BORDER_STRONG}; border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; font-family: {mono}; font-size: 8.5pt; letter-spacing: 2px; }}
+QTabBar::tab:hover {{ background: {SURFACE_3}; color: {TEXT}; }}
+QTabBar::tab:selected {{ background: {ACCENT}; color: {ACCENT_TEXT}; border-color: {ACCENT}; }}
+QTabBar {{ border-bottom: 2px solid {ACCENT}; }}
 
 QTableWidget, QTreeWidget, QListWidget {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 8px; gridline-color: transparent; selection-background-color: {SURFACE_3}; selection-color: {TEXT}; alternate-background-color: {BG_ALT}; }}
 QTableWidget::item, QTreeWidget::item {{ padding: 4px; border-bottom: 1px solid {BORDER}; }}

@@ -64,6 +64,7 @@ class DropZone(QFrame):
 
     chooseClicked = Signal()
     recordClicked = Signal()
+    recentClicked = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -85,6 +86,7 @@ class DropZone(QFrame):
                     "muted", wrap=True)
         sub.setAlignment(Qt.AlignCenter)
         sub.setFixedWidth(460)
+        sub.setMinimumHeight(sub.heightForWidth(460))  # wrapped text keeps all its lines
         lay.addWidget(sub, alignment=Qt.AlignCenter)
         btn = QPushButton("Choose WAV File")
         btn.setProperty("role", "primary")
@@ -114,6 +116,39 @@ class DropZone(QFrame):
         steps_w.setLayout(steps)
         lay.addSpacing(10)
         lay.addWidget(steps_w, alignment=Qt.AlignCenter)
+        # recent recordings: one click to continue where you left off
+        self.recent_box = QWidget()
+        rl = QVBoxLayout(self.recent_box)
+        rl.setContentsMargins(0, 14, 0, 0)
+        rl.setSpacing(2)
+        head = label("RECENT", "section")
+        head.setAlignment(Qt.AlignCenter)
+        rl.addWidget(head)
+        self.recent_list = QVBoxLayout()
+        self.recent_list.setSpacing(0)
+        rl.addLayout(self.recent_list)
+        self.recent_box.setVisible(False)
+        lay.addWidget(self.recent_box, alignment=Qt.AlignCenter)
+
+    def set_recent(self, paths: list[str], limit: int = 5):
+        from pathlib import Path
+
+        from PySide6.QtWidgets import QToolButton
+
+        while self.recent_list.count():
+            w = self.recent_list.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        shown = [p for p in paths if Path(p).exists()][:limit]
+        for p in shown:
+            b = QToolButton()
+            b.setText(Path(p).name)
+            b.setToolTip(p)
+            b.setProperty("role", "link")
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, x=p: self.recentClicked.emit(x))
+            self.recent_list.addWidget(b, alignment=Qt.AlignCenter)
+        self.recent_box.setVisible(bool(shown))
 
     def set_hover(self, on: bool):
         self.hover = on

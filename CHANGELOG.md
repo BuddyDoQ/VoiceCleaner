@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.7
+
+- **Batch tab shows the settings:** the settings sidebar (preset, Smart, sliders, EQ,
+  dynamics) is now on the right of the Batch tab too, so you no longer go back to Enhance to
+  change them. It is the same panel: a change in either tab applies to both.
+- **Batch results:** *Open Output Folder* when the batch is done, and double-click a finished
+  file to compare it in the Enhance tab.
+- **Clearer layout:** in dark mode the panels stand out more from the background, and the
+  section tabs (Enhance, Playback, Compile, Batch) are now real tab buttons with the current
+  one highlighted.
+- **Fixed:** slider knobs were cut off at the top and bottom, most visibly with Windows display
+  scaling above 100 %.
+- **Fixed:** the start screen's description could lose its second line.
+- **Quitting while working asks first** (enhancing, exporting, a batch or a recording).
+- **Recent recordings on the start screen**, and VoiceCleaner reopens on the tab you used last.
+- The Smart explanation can be hidden with its ×; *Show Tips Again* in the menu brings it back.
+
 ## 1.0.6
 
 - **Splash screen:** VoiceCleaner shows a splash immediately when it starts, with what it

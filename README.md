@@ -165,6 +165,8 @@ The guiding rule is *better speech, not obviously processed speech*.
   too, where it is slower.
 * **Undo / redo** settings changes with `Ctrl+Z` / `Ctrl+Y` or the ↶ ↷ buttons next to
   the preset. A slider drag is one step; the tooltip names the change.
+* **Smart note:** the × hides the explanation under *Smart settings* (the AUTO labels stay);
+  *Show Tips Again* in the menu brings it back.
 * **While working:** the step and percentage show on the waveform being processed, the
   sidebar shows elapsed time and an estimate of the time left, a header chip shows the
   running job from any tab (click it to go there), and the busy tab carries a badge
@@ -176,7 +178,9 @@ The guiding rule is *better speech, not obviously processed speech*.
   `Ctrl+Enter` enhance, `Ctrl+E` export, `R` record/stop, `Ctrl+Shift+N` new session,
   `Esc` cancel. `Space` plays whichever tab is in front (Enhance or Playback). `Ctrl+wheel` zooms the waveform.
   The menu's *Keyboard Shortcuts* (`Ctrl+/`) lists them all.
-* **Open Recent** (app menu): the last ten recordings you opened.
+* **Open Recent** (app menu): the last ten recordings you opened. The start screen lists
+  the last five for one-click access. VoiceCleaner reopens on the tab you used last.
+* **Quitting while working** (enhancing, exporting, a batch or a recording) asks first.
 * **Export:** tick *Show the file in Explorer when done* to go straight to the exported
   file instead of the confirmation box; the choice is remembered.
 * **Record:** click **● Record** on the Original track (or *Record Audio* on the start
@@ -237,7 +241,9 @@ The guiding rule is *better speech, not obviously processed speech*.
   menu also offers *Automatic*, which follows Windows' light/dark setting. Colors and
   type follow the Steamburger Studios website (Bebas Neue, Syne, DM Mono).
 * **Batch:** drop several files (or a folder). Each file is analyzed and enhanced on its
-  own; a damaged file is reported and the rest continue.
+  own; a damaged file is reported and the rest continue. The settings sidebar is shown on
+  the right of the Batch tab (the same settings as Enhance). When done, *Open Output Folder*
+  shows the results, and double-clicking a finished file opens it in Enhance to compare.
 * **Export:** WAV 16-bit (dithered), 24-bit (default) or 32-bit float, original or
   converted sample rate; optional MP3. The original file is never overwritten.
 

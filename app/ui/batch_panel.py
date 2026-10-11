@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QHBoxL
 
 from ..audio.loader import format_duration, probe
 from ..utils.errors import VoiceCleanerError
+from ..utils.shell import FILE_MANAGER, open_folder
 from . import theme
 from .widgets import label
 
@@ -19,10 +20,12 @@ COL_NAME, COL_STATUS, COL_DURATION, COL_PROGRESS = range(4)
 class BatchPanel(QWidget):
     startRequested = Signal(list, object)  # files, output dir (Path | None)
     cancelRequested = Signal()
+    openRequested = Signal(object)  # Path of a finished file, to compare in the Enhance tab
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.files: list[Path] = []
+        self.outputs: dict[int, Path] = {}  # row -> enhanced file
         self.running = False
         self._done = self._failed = 0
         lay = QVBoxLayout(self)
@@ -43,7 +46,8 @@ class BatchPanel(QWidget):
             head.addWidget(b)
         lay.addLayout(head)
         lay.addWidget(label("Drop several WAV files anywhere in this window. Each file is analyzed and enhanced with "
-                            "the preset and settings from the Enhance tab, then saved as a new file.", "muted", wrap=True))
+                            "the settings on the right (the same as in the Enhance tab), then saved as a new file. "
+                            "Double-click a finished file to compare it in the Enhance tab.", "muted", wrap=True))
 
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["File", "Status", "Duration", "Progress"])
@@ -58,6 +62,7 @@ class BatchPanel(QWidget):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setShowGrid(False)
         self.table.verticalHeader().setDefaultSectionSize(40)
+        self.table.cellDoubleClicked.connect(self._open_row)
         lay.addWidget(self.table, 1)
 
         bottom = QHBoxLayout()
@@ -72,6 +77,11 @@ class BatchPanel(QWidget):
         bottom.addStretch(1)
         self.summary = label("", "muted")
         bottom.addWidget(self.summary)
+        self.open_out_btn = QPushButton("Open Output Folder")
+        self.open_out_btn.setToolTip(f"Show the enhanced files in {FILE_MANAGER}")
+        self.open_out_btn.clicked.connect(self._open_output_folder)
+        self.open_out_btn.setVisible(False)
+        bottom.addWidget(self.open_out_btn)
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.clicked.connect(self.cancelRequested)
         self.cancel_btn.setVisible(False)
@@ -128,6 +138,7 @@ class BatchPanel(QWidget):
         if self.running:
             return
         self.files.clear()
+        self.outputs.clear()
         self.table.setRowCount(0)
         self._update_buttons()
 
@@ -138,6 +149,7 @@ class BatchPanel(QWidget):
         for r in rows:
             self.table.removeRow(r)
             del self.files[r]
+        self.outputs = {}  # row numbers changed; results stay on disk
         self._update_buttons()
 
     def _choose(self):
@@ -176,6 +188,7 @@ class BatchPanel(QWidget):
         for r in range(len(self.files)):
             self._set_status(r, "Waiting")
             self._bar(r).setValue(0)
+        self.outputs.clear()
         self.startRequested.emit(list(self.files), self.output_dir)
 
     def set_running(self, running: bool):
@@ -201,8 +214,25 @@ class BatchPanel(QWidget):
             self._failed += 1
         self.summary.setText(f"{self._done} done" + (f", {self._failed} failed" if self._failed else ""))
 
+    def file_output(self, i: int, path: str):
+        self.outputs[i] = Path(path)
+        item = self.table.item(i, COL_NAME)
+        if item is not None:
+            item.setToolTip(f"{self.files[i]}\n\u2192 {path}\nDouble-click to compare it in the Enhance tab.")
+
+    def _open_row(self, row: int, _col: int):
+        out = self.outputs.get(row)
+        if out is not None and out.exists():
+            self.openRequested.emit(out)
+
+    def _open_output_folder(self):
+        outs = [p for p in self.outputs.values() if p.exists()]
+        if outs:
+            open_folder(outs[0].parent)
+
     def _update_buttons(self):
         has = bool(self.files)
+        self.open_out_btn.setVisible(not self.running and bool(self.outputs))
         self.start_btn.setEnabled(has and not self.running)
         self.start_btn.setText("Processing…" if self.running else "Enhance All")
         self.cancel_btn.setVisible(self.running)

@@ -147,7 +147,7 @@ def test_panel_smart_locks_its_controls_and_explains(qapp, analysis):
     assert not p.noise.slider.isEnabled() and p.noise.value_label.text().startswith("AUTO")
     assert not p._advanced["compressor_amount"].slider.isEnabled()
     assert p._advanced["leveler_amount"].slider.isEnabled()  # not Smart's
-    assert not p.smart_note.isHidden() and "Smart is on" in p.smart_note.text()
+    assert not p.smart_note.isHidden() and "Smart is on" in p.smart_note_text.text()
     p.smart.setChecked(False)
     assert p.noise.slider.isEnabled() and not p.noise.value_label.text().startswith("AUTO")
     assert p.smart_note.isHidden()

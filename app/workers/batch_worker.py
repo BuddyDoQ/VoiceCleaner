@@ -80,6 +80,7 @@ class BatchRunner(QObject):
     fileStarted = Signal(int)
     fileProgress = Signal(int, float, str)
     fileFinished = Signal(int, bool, str)  # index, success, message
+    fileOutput = Signal(int, str)  # index, path of the enhanced file
     finished = Signal()
 
     def __init__(self, files: list[Path], options: BatchOptions, model_manager_getter):
@@ -110,6 +111,7 @@ class BatchRunner(QObject):
             try:
                 out, result = enhance_file(path, self.options, mm, ctx)
                 msg = f"Complete → {out.name} ({result.realtime_factor:.1f}x realtime)"
+                self.fileOutput.emit(i, str(out))
                 self.fileFinished.emit(i, True, msg)
                 log.info("Batch file %s done in %.1fs -> %s", path, time.perf_counter() - t0, out)
             except CancelledError:

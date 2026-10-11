@@ -42,9 +42,9 @@ def test_theme_day_night_switch():
     app = QApplication.instance() or QApplication([])
     assert theme.apply(app, "night") == "night"
     night_bg = theme.BG
-    assert "#080810" in theme.STYLESHEET
+    assert theme.NIGHT["BG"] in theme.STYLESHEET
     assert theme.apply(app, "day") == "day"
-    assert theme.BG != night_bg and "#f2f2f5" in theme.STYLESHEET
+    assert theme.BG != night_bg and theme.DAY["BG"] in theme.STYLESHEET
     assert theme.FONT_DISPLAY == "Bebas Neue" and theme.FONT_UI == "Syne" and theme.FONT_MONO == "DM Mono"
     theme.apply(app, "night")
 

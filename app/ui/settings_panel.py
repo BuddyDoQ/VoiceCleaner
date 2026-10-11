@@ -134,8 +134,13 @@ class SettingsPanel(QWidget):
     downloadResynthRequested = Signal()
     historyChanged = Signal()  # undo/redo availability or labels changed
 
-    def __init__(self, initial: ProcessingSettings, smart: bool = True, advanced_open: bool = False, parent=None):
+    smartNoteHidden = Signal()  # the user closed the Smart explanation
+
+    def __init__(self, initial: ProcessingSettings, smart: bool = True, advanced_open: bool = False, parent=None,
+                 smart_note_hidden: bool = False):
         super().__init__(parent)
+        self._context = "enhance"  # or "batch": the same panel serves both tabs
+        self._note_hidden = smart_note_hidden
         self.settings = initial
         self.analysis: AnalysisResult | None = None
         self.auto_notes: list[str] = []
@@ -207,9 +212,23 @@ class SettingsPanel(QWidget):
                               "While on, the controls it sets are locked and marked AUTO.")
         self.smart.toggled.connect(self._smart_toggled)
         lay.addWidget(self.smart)
-        self.smart_note = QLabel()
-        self.smart_note.setWordWrap(True)
+        self.smart_note = QFrame()
         self.smart_note.setProperty("role", "smartnote")
+        nl = QHBoxLayout(self.smart_note)
+        nl.setContentsMargins(8, 6, 4, 6)
+        nl.setSpacing(4)
+        self.smart_note_text = QLabel()
+        self.smart_note_text.setWordWrap(True)
+        self.smart_note_text.setProperty("role", "smartnotetext")
+        nl.addWidget(self.smart_note_text, 1)
+        close = QToolButton()
+        close.setText("\u00d7")
+        close.setProperty("role", "link")
+        close.setStyleSheet("font-size: 13pt; padding: 0 4px;")
+        close.setCursor(Qt.PointingHandCursor)
+        close.setToolTip("Hide this note (the AUTO labels stay). Menu \u2192 Show Tips Again brings it back.")
+        close.clicked.connect(self.hide_smart_note)
+        nl.addWidget(close, 0, Qt.AlignTop)
         lay.addWidget(self.smart_note)
 
         lay.addWidget(_divider())
@@ -694,13 +713,30 @@ class SettingsPanel(QWidget):
         for key, w in self._advanced.items():
             if key in SMART_FIELDS:
                 w.set_auto(on)
-        self.smart_note.setVisible(on)
+        self.smart_note.setVisible(on and not self._note_hidden)
         if on:
-            when = "this recording" if self.analysis is not None else "each recording when it is loaded"
-            self.smart_note.setText(
+            if self._context == "batch":
+                when = "each file in the batch"
+            else:
+                when = "this recording" if self.analysis is not None else "each recording when it is loaded"
+            self.smart_note_text.setText(
                 f"<b>Smart is on.</b> Noise, Speech and Room (and the controls tied to them, marked "
                 f"<span style='color:{theme.ACCENT}'>AUTO</span>) are set for {when}. "
                 "Turn Smart off to adjust them yourself.")
+
+    def hide_smart_note(self):
+        self._note_hidden = True
+        self._sync_smart_ui()
+        self.smartNoteHidden.emit()
+
+    def show_tips(self):
+        self._note_hidden = False
+        self._sync_smart_ui()
+
+    def set_context(self, context: str):
+        """"enhance" or "batch": only the wording of the Smart note differs."""
+        self._context = context
+        self._sync_smart_ui()
 
     def _update_preset_desc(self):
         name = self.preset.currentText()

@@ -138,8 +138,15 @@ class MainWindow(QMainWindow):
         self.batch_panel = BatchPanel()
         self.batch_panel.startRequested.connect(self._start_batch)
         self.batch_panel.cancelRequested.connect(self._cancel_batch)
+        self.batch_panel.openRequested.connect(self._open_batch_result)
         self.batch_panel.set_output_dir(config.batch_output_dir)
-        self.tabs.addTab(self.batch_panel, "BATCH")
+        # the Batch tab shows the same settings sidebar as Enhance (moved on tab change)
+        self.batch_page = QWidget()
+        self._batch_layout = QHBoxLayout(self.batch_page)
+        self._batch_layout.setContentsMargins(0, 0, 0, 0)
+        self._batch_layout.setSpacing(0)
+        self._batch_layout.addWidget(self.batch_panel, 1)
+        self.tabs.addTab(self.batch_page, "BATCH")
         self.tabs.currentChanged.connect(self._tab_changed)
         self._tab_titles = {self.tabs.widget(i): self.tabs.tabText(i) for i in range(self.tabs.count())}
         self.activity = ActivityTracker(self)
@@ -161,6 +168,9 @@ class MainWindow(QMainWindow):
                                                                          self.compile_panel.pause()))
         self.playback.set_session(self.session, sessions.sessions_root())
         self.compile_panel.set_session(self.session)
+        last = self.config.extra.get("last_tab", 0)
+        if isinstance(last, int) and 0 < last < self.tabs.count():
+            self.tabs.setCurrentIndex(last)  # where the user left off
         QTimer.singleShot(50, self._init_engine)
 
         self.update_checker = UpdateChecker(self)
@@ -260,6 +270,7 @@ class MainWindow(QMainWindow):
             self.theme_actions[key] = a
         m.addSeparator()
         m.addAction("Keyboard Shortcuts", self._show_shortcuts, QKeySequence("Ctrl+/"))
+        m.addAction("Show Tips Again", self._show_tips)
         m.addAction("Open Log Folder", lambda: self._open_folder(log_dir()))
         m.addAction("Models and Licenses", self._show_models)
         self.update_action = m.addAction("Check for Updates\u2026", lambda: self.check_for_updates(manual=True))
@@ -276,6 +287,8 @@ class MainWindow(QMainWindow):
         self.drop_zone = DropZone()
         self.drop_zone.chooseClicked.connect(self.choose_file)
         self.drop_zone.recordClicked.connect(self.start_new_recording)
+        self.drop_zone.recentClicked.connect(lambda p: self._open_recent(Path(p)))
+        self.drop_zone.set_recent([p for p in self.config.extra.get("recent_files", []) if isinstance(p, str)])
         dz_wrap = QWidget()
         dzl = QVBoxLayout(dz_wrap)
         dzl.setContentsMargins(24, 20, 24, 24)
@@ -293,7 +306,9 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(editor_scroll)
         self.stack.currentChanged.connect(lambda _: QTimer.singleShot(0, self._fit_transport))
         lay.addWidget(self.stack, 1)
-        lay.addWidget(self._build_sidebar())
+        self.sidebar = self._build_sidebar()
+        self._enhance_layout = lay
+        lay.addWidget(self.sidebar)
         return page
 
     def _build_editor(self) -> QWidget:
@@ -528,7 +543,9 @@ class MainWindow(QMainWindow):
                                        pause_keep_ms=float(pauses.get("keep_ms", initial.pause_keep_ms)))
             except (TypeError, ValueError):
                 pass
-        self.settings_panel = SettingsPanel(initial, self.config.auto_settings, self.config.advanced_open)
+        self.settings_panel = SettingsPanel(initial, self.config.auto_settings, self.config.advanced_open,
+                                            smart_note_hidden=bool(self.config.extra.get("smart_note_hidden")))
+        self.settings_panel.smartNoteHidden.connect(lambda: self.config.extra.update(smart_note_hidden=True))
         self.settings_panel.restore_section_states(self.config.extra.get("sections", {}))
         self.settings_panel.downloadResynthRequested.connect(self._download_resynth_model)
         il.addWidget(self.settings_panel)
@@ -583,6 +600,7 @@ class MainWindow(QMainWindow):
             b.setSizePolicy(b.sizePolicy().horizontalPolicy(), QSizePolicy.Fixed)
             b.setMinimumHeight(b.sizeHint().height())
         actions.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.sidebar_actions = actions  # Enhance/Export: hidden when the sidebar is in the Batch tab
         v.addWidget(actions)
         self.settings_panel.settingsChanged.connect(self._settings_changed)
         return side
@@ -1044,11 +1062,11 @@ class MainWindow(QMainWindow):
 
     # ============================================================================ undo
     def _undo_shortcut(self):
-        if self.tabs.currentIndex() == 0:  # settings live on the Enhance tab
+        if self.tabs.currentWidget() in (self.tabs.widget(0), self.batch_page):  # where the settings are
             self.settings_panel.undo()
 
     def _redo_shortcut(self):
-        if self.tabs.currentIndex() == 0:
+        if self.tabs.currentWidget() in (self.tabs.widget(0), self.batch_page):
             self.settings_panel.redo()
 
     # ============================================================================ live preview
@@ -1454,9 +1472,10 @@ class MainWindow(QMainWindow):
         runner.fileStarted.connect(bp.file_started)
         runner.fileProgress.connect(bp.file_progress)
         runner.fileFinished.connect(bp.file_finished)
+        runner.fileOutput.connect(bp.file_output)
         runner.finished.connect(self._batch_done)
         n = len(files)
-        self.activity.start("batch", "Batch", self.batch_panel)
+        self.activity.start("batch", "Batch", self.batch_page)
         self.activity.update("batch", 0.0, "Starting", badge=f"0/{n}")
         runner.fileStarted.connect(lambda i: self.activity.update("batch", i / n, f"File {i + 1} of {n}",
                                                                   badge=f"{i + 1}/{n}"))
@@ -1494,12 +1513,12 @@ class MainWindow(QMainWindow):
         if not wavs:
             self._error("Not a WAV file", "VoiceCleaner opens WAV recordings. Drop a .wav file.")
             return
-        if len(wavs) == 1 and self.tabs.currentWidget() is not self.batch_panel:
+        if len(wavs) == 1 and self.tabs.currentWidget() is not self.batch_page:
             self.tabs.setCurrentIndex(0)
             self.open_file(wavs[0])
         else:
             self.batch_panel.add_files(wavs)
-            self.tabs.setCurrentWidget(self.batch_panel)
+            self.tabs.setCurrentWidget(self.batch_page)
 
     # ============================================================================ misc
     def _open_folder(self, path: Path):
@@ -1670,6 +1689,15 @@ class MainWindow(QMainWindow):
 
     # ============================================================================ tabs / playback
     def _tab_changed(self, index: int):
+        page = self.tabs.widget(index)
+        if page is self.batch_page and self.sidebar.parent() is not self.batch_page:
+            self._batch_layout.addWidget(self.sidebar)
+            self.sidebar_actions.setVisible(False)
+            self.settings_panel.set_context("batch")
+        elif index == 0 and self.sidebar.parent() is self.batch_page:
+            self._enhance_layout.addWidget(self.sidebar)
+            self.sidebar_actions.setVisible(True)
+            self.settings_panel.set_context("enhance")
         if self.tabs.widget(index) is self.playback:
             self.playback.refresh()
         elif self.tabs.widget(index) is self.compile_panel:
@@ -1741,7 +1769,13 @@ class MainWindow(QMainWindow):
 
     def _add_to_batch(self, paths):
         self.batch_panel.add_files([Path(p) for p in paths])
-        self.tabs.setCurrentWidget(self.batch_panel)
+        self.tabs.setCurrentWidget(self.batch_page)
+
+    def _open_batch_result(self, path: Path):
+        """Compare a finished batch file: open it in the Enhance tab."""
+        self.tabs.setCurrentIndex(0)
+        if not self._task_running():
+            self.open_file(Path(path))
 
     # ============================================================================ settings
     def _initial_settings(self) -> ProcessingSettings | None:
@@ -1765,6 +1799,7 @@ class MainWindow(QMainWindow):
         p = str(path)
         items = [p] + [x for x in items if os.path.normcase(x) != os.path.normcase(p)]
         self.config.extra["recent_files"] = items[:MAX_RECENT]
+        self.drop_zone.set_recent(items[:MAX_RECENT])
 
     def _fill_recent_menu(self):
         m = self.recent_menu
@@ -1783,20 +1818,57 @@ class MainWindow(QMainWindow):
             m.addAction("No recent files").setEnabled(False)
         else:
             m.addSeparator()
-            m.addAction("Clear Recent Files", lambda: self.config.extra.update(recent_files=[]))
+            m.addAction("Clear Recent Files", self._clear_recent)
         m.setToolTipsVisible(True)
+
+    def _clear_recent(self):
+        self.config.extra["recent_files"] = []
+        self.drop_zone.set_recent([])
 
     def _open_recent(self, path: Path):
         self.tabs.setCurrentIndex(0)
         if path.exists():
             self.open_file(path)
 
+    def _show_tips(self):
+        self.config.extra["smart_note_hidden"] = False
+        self.settings_panel.show_tips()
+
     def _show_shortcuts(self):
         rows = "".join(f"<tr><td style='padding:3px 18px 3px 0'><b>{shortcut_text(k)}</b></td><td>{v}</td></tr>"
                        for k, v in SHORTCUTS)
         QMessageBox.information(self, "Keyboard Shortcuts", f"<table>{rows}</table>")
 
+    def _work_in_progress(self) -> str:
+        """What would be lost by quitting now, or ""."""
+        if self.record_panel.recording:
+            return "A recording is in progress. Quitting stops it; what was captured so far is kept."
+        if self._batch:
+            job = self.activity.job("batch")
+            where = f" ({job.badge})" if job is not None and job.badge else ""
+            return f"A batch is running{where}. Quitting cancels the files not finished yet."
+        if self._task_running():
+            job = self.activity.job(self._job_key) if self._job_key else None
+            what = (job.label if job is not None else "Processing").lower()
+            pct = f" ({job.fraction * 100:.0f}%)" if job is not None and job.fraction is not None else ""
+            return f"VoiceCleaner is still {what}{pct}. Quitting cancels it."
+        return ""
+
     def closeEvent(self, e):
+        busy = self._work_in_progress()
+        if busy and not getattr(self, "_force_close", False):
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle(f"Quit {APP_NAME}?")
+            box.setText("<b>Quit while work is in progress?</b>")
+            box.setInformativeText(busy)
+            quit_btn = box.addButton("Quit", QMessageBox.DestructiveRole)
+            keep = box.addButton("Keep Working", QMessageBox.RejectRole)
+            box.setDefaultButton(keep)
+            box.exec()
+            if box.clickedButton() is not quit_btn:
+                e.ignore()
+                return
         if self._task_running():
             self.task.cancel()
             self.task.wait(3000)
@@ -1823,6 +1895,7 @@ class MainWindow(QMainWindow):
         c.extra["eq_tilt"] = s.eq_tilt
         c.extra["session_path"] = str(self.session.path)
         c.extra["theme"] = self.theme_pref
+        c.extra["last_tab"] = self.tabs.currentIndex()
         try:
             c.save()
         except OSError as exc:

@@ -109,6 +109,11 @@ def main():
     w.check_for_updates(manual=True)
     pump(app, lambda: any(isinstance(x, UpdateDialog) and x.isVisible() for x in app.topLevelWidgets()), 30)
     dlg = next(x for x in app.topLevelWidgets() if isinstance(x, UpdateDialog))
+    # record instead of opening Finder (the served "DMG" is random bytes)
+    import app.ui.update_dialog as ud
+    shown = []
+    ud.open_file = lambda path: shown.append(("open", path))
+    ud.reveal = lambda path: shown.append(("reveal", path))
     print("plan:", dlg.plan.mode, dlg.plan.asset.name)
     check("Install Update offered", dlg.action_btn.text() in ("Install Update", "Download"))
     dlg.grab().save(str(out / "1_update_available.png"))
@@ -118,6 +123,8 @@ def main():
     check("progress shows MB and time", "MB" in dlg.state.text())
     pump(app, lambda: dlg.installer is not None, 60)
     check("downloaded and verified", dlg.installer.read_bytes() == PAYLOAD and "verified" in dlg.state.text())
+    if sys.platform == "darwin":
+        check("the verified DMG is opened in Finder", shown == [("open", dlg.installer)])
     dlg.grab().save(str(out / "3_ready.png"))
     if dlg.plan.installs:
         check("install buttons shown", dlg.now_btn.isVisible() and dlg.on_quit_btn.isVisible())

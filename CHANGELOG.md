@@ -18,6 +18,10 @@
   - Uses the app's colours and follows its day/night setting (the ◐ button can keep it
     always Dark or Light). Warns when the microphone sends only silence.
 
+- **Mac:** the teleprompter's controls and help use the app's text size and typeface (its
+  control bar no longer runs past the window edge), the retake key is shown as *Delete (⌫)*,
+  and the script editor uses DM Mono.
+
 ## 1.0.9
 
 - **Install updates from inside VoiceCleaner (Windows).** When an update is available,
@@ -29,8 +33,8 @@
   the update with its own progress window.
   - This works from 1.0.9 on: the installer now records where VoiceCleaner is installed, so
     updates go into the same folder. To get 1.0.9 itself, install it as before.
-  - Portable copies keep opening the release page; on macOS the DMG is downloaded, checked
-    and shown in Finder.
+  - Portable copies keep opening the release page. On macOS the DMG is downloaded, checked
+    and opened, showing VoiceCleaner next to the Applications folder to drag it over.
 - Quitting during work still asks first; an update chosen with *Install and Restart* then
   waits until you quit.
 

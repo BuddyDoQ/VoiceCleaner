@@ -19,6 +19,16 @@ def reveal(path: Path) -> None:
         subprocess.Popen(["xdg-open", str(Path(path).parent)])
 
 
+def open_file(path: Path) -> None:
+    """Open ``path`` with its default app (a .dmg mounts and shows its window on macOS)."""
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    elif sys.platform == "win32":
+        os.startfile(str(path))  # noqa: S606
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
+
+
 def open_folder(path: Path) -> None:
     if sys.platform == "darwin":
         subprocess.Popen(["open", str(path)])
@@ -27,6 +37,9 @@ def open_folder(path: Path) -> None:
     else:
         subprocess.Popen(["xdg-open", str(path)])
 
+
+# The key Qt calls Backspace is labelled "delete" (⌫) on Mac keyboards.
+BACKSPACE_NAME = "Delete (⌫)" if sys.platform == "darwin" else "Backspace"
 
 # Redo is Ctrl+Y on Windows; macOS has no Cmd+Y redo, its standard is Shift+Cmd+Z
 # (both are bound in the main window through QKeySequence.Redo and Ctrl+Shift+Z).

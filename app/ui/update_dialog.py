@@ -2,6 +2,7 @@
 that downloads, verifies and (for installed copies on Windows) installs the update."""
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from pathlib import Path
@@ -14,7 +15,7 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QLabel, QProgres
 from ..utils import update_install, updates
 from ..utils.config import APP_VERSION
 from ..utils.logging import get_logger
-from ..utils.shell import reveal
+from ..utils.shell import open_file, reveal
 from .brand import logo_pixmap
 
 log = get_logger("updates")
@@ -252,9 +253,13 @@ class UpdateDialog(QDialog):
             self.now_btn.setVisible(True)
             self.now_btn.setDefault(True)
             self.now_btn.setFocus()
-        else:  # portable copy or macOS: show the verified file
-            self.state.setText(f"<b>Downloaded and verified:</b> {path.name}. Quit VoiceCleaner, then install it "
-                               "(on a Mac: open it and drag VoiceCleaner to Applications, replacing the old one).")
+        elif sys.platform == "darwin" and path.suffix.lower() == ".dmg":
+            # open the disk image: Finder shows VoiceCleaner next to the Applications folder
+            self.state.setText(f"<b>Downloaded and verified:</b> {path.name} is open in Finder. Quit VoiceCleaner, "
+                               "then drag VoiceCleaner onto Applications and choose Replace.")
+            open_file(path)
+        else:  # portable copy: show the verified file
+            self.state.setText(f"<b>Downloaded and verified:</b> {path.name}. Quit VoiceCleaner, then install it.")
             reveal(path)
             self.later_btn.setText("Close")
             self.later_btn.setVisible(True)

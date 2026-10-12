@@ -20,10 +20,11 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QKeySequence, QLinearGradient, QPainter, QPainterPath,
                            QPolygonF, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument)
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit,
-                               QPushButton, QSlider, QVBoxLayout, QWidget)
+                               QPushButton, QSizePolicy, QSlider, QVBoxLayout, QWidget)
 
 from ..audio.recorder import InputSource, RecordingError, list_sources
 from ..utils.logging import get_logger
+from ..utils.shell import BACKSPACE_NAME
 from .run import PrompterRun
 from .script import SAMPLE, Script, Unit, parse
 from .takes import TakeBook, TakeInfo, TakeRecorder
@@ -59,8 +60,11 @@ READ_FRAC = 0.40
 
 
 def build_style() -> str:
+    from ..ui import theme  # point sizes scaled like the app's (macOS draws them a quarter smaller)
+
     panel = _rgba(C["panel"], C["panel_alpha"])
-    return f"""
+    mono = f"'{theme.FONT_MONO}', Consolas, monospace"
+    return theme._scale_pt(f"""
 QWidget#prompter {{ background: {C['bg']}; }}
 QFrame#bar, QFrame#help, QFrame#editor_box {{ background: {panel}; border: 1px solid {C['border']}; border-radius: 12px; }}
 QFrame#bar QLabel, QFrame#help QLabel {{ color: {C['muted']}; font-size: 10pt; background: transparent; }}
@@ -78,13 +82,13 @@ QLabel#status {{ color: {C['text']}; background: {panel}; border: 1px solid {C['
     padding: 8px 16px; font-size: 12pt; }}
 QLabel#countdown {{ color: {C['accent']}; background: {C['count_bg']}; font-weight: 800; }}
 QPlainTextEdit {{ background: {C['inset']}; color: {C['text']}; border: 1px solid {C['border']}; border-radius: 8px;
-    font-family: Consolas, monospace; font-size: 11pt; padding: 8px; }}
+    font-family: {mono}; font-size: 11pt; padding: 8px; }}
 QFrame#editor_shade {{ background: {C['shade']}; }}
 QSlider::groove:horizontal {{ height: 4px; background: {C['track']}; border-radius: 2px; }}
 QSlider::sub-page:horizontal {{ background: {C['accent']}; border-radius: 2px; }}
 QSlider::handle:horizontal {{ background: {C['text']}; width: 14px; height: 14px; margin: -5px 0; border-radius: 7px; }}
 QSlider:horizontal {{ min-height: 18px; }}
-"""
+""")
 
 
 class _MicCombo(QComboBox):
@@ -364,7 +368,7 @@ class TeleprompterWindow(QWidget):
         self.meter.setFixedWidth(110)
         self.play_btn = self._btn("▶ Start", self.toggle_play, "Start recording and scrolling (Space)", "play")
         self.stop_btn = self._btn("■ Stop", self.stop, "Stop and save the take (Esc)")
-        self.retake_btn = self._btn("⟲ Retake", self.retake, "Record this section again (Backspace or PageUp)",
+        self.retake_btn = self._btn("⟲ Retake", self.retake, f"Record this section again ({BACKSPACE_NAME} or PageUp)",
                                     "retake")
         self.keep_btn = self._btn("★ Keep", self.keep, "Keep this take: later retakes don't replace it (G)")
         self.last_btn = self._btn("▶ Last take", self.play_last, "Listen to the last take (P)")
@@ -397,7 +401,9 @@ class TeleprompterWindow(QWidget):
         self.cd_btn.setCheckable(True)
         self.cd_btn.setChecked(bool(self.prefs.get("countdown", True)))
         self.mic_combo = _MicCombo(self._fill_mics)
-        self.mic_combo.setFixedWidth(220)
+        self.mic_combo.setMinimumWidth(120)  # shrinks when the window (or larger text, macOS) needs room
+        self.mic_combo.setMaximumWidth(220)
+        self.mic_combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.mic_combo.setToolTip("Microphone the takes are recorded from")
         self._fill_mics()
         self.speed.setToolTip("Scrolling speed (↑ ↓)")
@@ -472,7 +478,7 @@ class TeleprompterWindow(QWidget):
 
         self.help_text.setText(
             f"{k('Space')} start / pause &nbsp; {k('Esc')} stop<br>"
-            f"{k('Backspace')} or {k('PgUp')} retake<br>"
+            f"{k(BACKSPACE_NAME)} or {k('PgUp')} retake<br>"
             f"{k(chr(0x2192))} or {k('PgDn')} next &nbsp; {k(chr(0x2190))} previous<br>"
             f"{k(chr(0x2191) + ' ' + chr(0x2193))} speed &nbsp; {k('+ ' + chr(0x2212))} size<br>"
             f"{k('G')} keep take &nbsp; {k('P')} play last take<br>"
@@ -545,6 +551,22 @@ class TeleprompterWindow(QWidget):
             if src is not None and src.id == want:
                 self.mic_combo.setCurrentIndex(i)
         self.mic_combo.blockSignals(False)
+
+    def _fit_min_width(self):
+        """Never narrower than the control bar needs: otherwise its right end (the microphone)
+        is pushed out of sight. Measured once styled, as text size depends on the platform."""
+        need = self.bar.minimumSizeHint().width() + 24
+        if self.minimumWidth() != need:
+            self.setMinimumWidth(need)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._fit_min_width()
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if e.type() in (e.Type.StyleChange, e.Type.FontChange) and hasattr(self, "bar"):
+            self._fit_min_width()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)

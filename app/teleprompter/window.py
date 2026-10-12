@@ -64,6 +64,21 @@ QSlider:horizontal {{ min-height: 18px; }}
 """
 
 
+class _MicCombo(QComboBox):
+    """Lists the microphones again each time it opens, so one plugged in later appears."""
+
+    def __init__(self, refresh):
+        super().__init__()
+        self._refresh = refresh
+
+    def showPopup(self):
+        self._refresh()
+        super().showPopup()
+
+
+SILENT_AFTER_S = 2.0  # this long with nothing but digital silence: warn
+
+
 def _reading_font() -> str:
     """A plain, very readable sans serif (the brand display fonts are for headings)."""
     families = set(QFontDatabase.families())
@@ -248,6 +263,7 @@ class TeleprompterWindow(QWidget):
     takeSaved = Signal(object, object)  # TakeInfo, Path of the take file
     recordingChanged = Signal(bool)
     scriptChanged = Signal()
+    closed = Signal()
 
     def __init__(self, session, prefs: dict, mic: InputSource | None = None, gain: float = 1.0, parent=None):
         super().__init__(parent, Qt.Window)
@@ -259,6 +275,8 @@ class TeleprompterWindow(QWidget):
         self.session = session
         self.book = TakeBook.shared(session.path)
         self.mic, self.gain = mic, gain
+        self._closing = False
+        self._silence_warned = False
         self.recorder: TakeRecorder | None = None
         self.run: PrompterRun | None = None
         self.playing = False
@@ -354,7 +372,7 @@ class TeleprompterWindow(QWidget):
         self.cd_btn = self._btn("Countdown", lambda: None, "3-2-1 countdown before recording starts")
         self.cd_btn.setCheckable(True)
         self.cd_btn.setChecked(bool(self.prefs.get("countdown", True)))
-        self.mic_combo = QComboBox()
+        self.mic_combo = _MicCombo(self._fill_mics)
         self.mic_combo.setFixedWidth(220)
         self.mic_combo.setToolTip("Microphone the takes are recorded from")
         self._fill_mics()
@@ -452,6 +470,8 @@ class TeleprompterWindow(QWidget):
         return s
 
     def _fill_mics(self):
+        keep = self.mic_combo.currentData()
+        self.mic_combo.blockSignals(True)
         self.mic_combo.clear()
         try:
             mics, _desk = list_sources()
@@ -461,11 +481,12 @@ class TeleprompterWindow(QWidget):
             return
         for m in mics:
             self.mic_combo.addItem(m.name + ("  (default)" if m.is_default else ""), m)
-        want = self.mic.id if self.mic else self.prefs.get("mic")
+        want = keep.id if keep is not None else (self.mic.id if self.mic else self.prefs.get("mic"))
         for i in range(self.mic_combo.count()):
             src = self.mic_combo.itemData(i)
             if src is not None and src.id == want:
                 self.mic_combo.setCurrentIndex(i)
+        self.mic_combo.blockSignals(False)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -485,6 +506,10 @@ class TeleprompterWindow(QWidget):
         self._place_status()
 
     def _place_status(self):
+        self.status.setWordWrap(True)
+        wide = len(self.status.text()) > 70  # long messages get a wide box, not a narrow column
+        self.status.setMinimumWidth(min(720, self.width() - 80) if wide else 0)
+        self.status.setMaximumWidth(max(300, min(900, self.width() - 80)))
         self.status.adjustSize()
         self.status.move((self.width() - self.status.width()) // 2, 18)
 
@@ -682,6 +707,14 @@ class TeleprompterWindow(QWidget):
                 self.run.poll()
             rms, peak = self.recorder.levels()
             self.meter.set_level(rms, peak)
+            r = self.recorder
+            if (not self._silence_warned and r.frames > SILENT_AFTER_S * r.sr and r.max_peak < 1e-6):
+                self._silence_warned = True
+                name = r.source.name if r.source else "the microphone"
+                self.rec_label.setText("\u25cf NO SOUND")
+                self.flash(f"No sound from \u201c{name}\u201d. It is sending pure silence: choose your microphone "
+                           "in the list at the top right (Stop first), and check that it is plugged in and not muted.",
+                           12000)
             if self.recorder.error:
                 err, self.recorder.error = self.recorder.error, ""
                 self.stop()
@@ -718,6 +751,7 @@ class TeleprompterWindow(QWidget):
                                 "microphone list.")
             return
         self.prefs["mic"] = src.id
+        self._silence_warned = False
         if self.book.script != self.stage.script.text or self.book.mode != self.mode or not self.book.units:
             self.book.set_script(self.stage.script.text, self.mode, self.stage.units)  # what the takes belong to
             self.book.save()
@@ -747,6 +781,8 @@ class TeleprompterWindow(QWidget):
         self.countdown.raise_()
 
         def step(k):
+            if self._closing:
+                return
             if self.recorder is None:
                 self.counting = False
                 self.countdown.setVisible(False)
@@ -797,8 +833,9 @@ class TeleprompterWindow(QWidget):
             self.scriptChanged.emit()
             self.flash(f"★ Take {self.book.selected(u.id).number} kept")
 
-    def stop(self):
-        """Stop recording: the current take ends (with a short tail) and is saved."""
+    def stop(self, now: bool = False):
+        """Stop recording: the current take ends (with a short tail) and is saved.
+        ``now``: save it before returning (the window is closing)."""
         self.playing = False
         self._target = None
         if self.recorder is None:
@@ -809,15 +846,21 @@ class TeleprompterWindow(QWidget):
         self.countdown.setVisible(False)
 
         def finish():
-            if run is not None and rec.capturing:
-                run.stop()
-            rec.stop()
             try:
-                rec.raw_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+                if run is not None and rec.capturing:
+                    run.stop()
+            finally:
+                rec.stop()
+                try:
+                    rec.raw_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
-        QTimer.singleShot(400, finish)  # let the last word's tail arrive
+        if now:
+            time.sleep(0.4)  # the last word's tail
+            finish()
+        else:
+            QTimer.singleShot(400, finish)  # let the last word's tail arrive
         self.stage.recording = False
         self.stage.update()
         self.recordingChanged.emit(False)
@@ -829,6 +872,9 @@ class TeleprompterWindow(QWidget):
         if getattr(info, "keeper", False):
             self.book.mark_keeper(info.unit, info.number)
         self._last_take = (info, path)
+        if self._closing:
+            self.takeSaved.emit(info, path)  # still enhanced and listed; no window to update
+            return
         u = next((u for u in self.stage.units if u.id == info.unit), None)
         self.flash(f"Take {info.number} saved — {u.title if u else info.unit} ({info.duration:.1f} s)", 2200)
         for i, unit in enumerate(self.stage.units):
@@ -913,11 +959,13 @@ class TeleprompterWindow(QWidget):
             super().keyPressEvent(e)
 
     def closeEvent(self, e):
+        self._closing = True
         if self.recording:
-            self.stop()
+            self.stop(now=True)  # the last take is saved before the window goes
         self.prefs["geometry"] = bytes(self.saveGeometry().toHex()).decode()
         if self._player is not None:
             self._player.shutdown()
+        self.closed.emit()
         super().closeEvent(e)
 
     def sizeHint(self):

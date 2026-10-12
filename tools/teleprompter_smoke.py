@@ -180,6 +180,34 @@ def main():
     pump(app, lambda: "Take 1 of 2" in cp.list.item(1).data(cp_title_role(cp)), 10)
     check("choosing take 1 for section 2 updates the row", True)
     p.close()
+
+    # ---- a microphone that sends only silence, and closing the window mid-recording
+    errors = []
+    import traceback
+
+    def hook(*exc):
+        errors.append(exc)
+        traceback.print_exception(*exc)
+
+    sys.excepthook = hook
+    silent = lambda stop: (np.zeros((2400, 1), np.float32) for _ in iter(lambda: stop.wait(0.05) or True, False))  # noqa: E731
+    tw.TeleprompterWindow._make_recorder = lambda self, raw, src: TakeRecorder(raw, src, blocks=silent)
+    before = len(TakeBook.shared(w.session.path).takes)
+    w.open_teleprompter()
+    p = w.prompter
+    p.cd_btn.setChecked(False)
+    p.toggle_play()
+    wait(app, 1.0)
+    pump(app, lambda: p.playing, 20)
+    wait(app, 2.6)
+    check("a silent microphone is reported", "NO SOUND" in p.rec_label.text() and p.status.isVisible()
+          and "No sound from" in p.status.text())
+    p.grab().save(str(out / "4_no_sound.png"))
+    p.close()  # while recording
+    wait(app, 1.0)
+    check("closing mid-recording saves the take", len(TakeBook.shared(w.session.path).takes) == before + 1)
+    check("closing mid-recording raises no error", not errors)
+    check("the window is gone", w.prompter is None)
     w.close()
     print("ALL PASSED" if ok else "SOME CHECKS FAILED")
     sys.exit(0 if ok else 1)

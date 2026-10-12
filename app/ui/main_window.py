@@ -1107,7 +1107,7 @@ class MainWindow(QMainWindow):
         self.prompter.takeSaved.connect(self._prompter_take)
         self.prompter.scriptChanged.connect(self.compile_panel.takes_changed)
         self.prompter.recordingChanged.connect(self._prompter_recording)
-        self.prompter.destroyed.connect(lambda *_: setattr(self, "prompter", None))
+        self.prompter.closed.connect(lambda: setattr(self, "prompter", None))  # before Qt deletes it
         self.prompter.setAttribute(Qt.WA_DeleteOnClose)
         self.prompter.show()
         self.prompter.raise_()

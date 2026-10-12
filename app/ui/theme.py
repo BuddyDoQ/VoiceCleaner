@@ -264,6 +264,8 @@ QPushButton[role="recbig"]:hover {{ background: #ff7377; }}
 QPushButton[role="recbig"]:disabled {{ background: {SURFACE_3}; color: {FAINT}; }}
 QPushButton[role="session"] {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; padding: 5px 12px; font-family: {mono}; font-size: 8.5pt; }}
 QPushButton[role="session"]::menu-indicator {{ image: none; width: 0; }}
+QPushButton[role="session"][state="open"] {{ border-color: {ACCENT}; color: {ACCENT}; }}
+QPushButton[role="session"][state="rec"] {{ border-color: {RECORD}; color: {RECORD}; font-weight: 700; }}
 
 QToolButton[role="link"] {{ border: none; color: {MUTED}; padding: 4px 0; }}
 QToolButton[role="link"]:hover {{ color: {ACCENT}; }}

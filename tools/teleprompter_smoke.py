@@ -118,8 +118,12 @@ def main():
     w.resize(1360, 880)
     w.show()
     pump(app, lambda: w._mm_ready.is_set(), 120)
-    w.open_teleprompter()
+    check("top bar button: closed", w.prompter_btn.property("state") == "" and "TELEPROMPTER" in w.prompter_btn.text())
+    w.prompter_btn.click()
     p = w.prompter
+    check("top bar button opens it", p is not None and w.prompter_btn.property("state") == "open")
+    w.prompter_btn.click()
+    check("clicking again keeps one window", w.prompter is p)
     p.resize(1200, 760)
     pump(app, lambda: p.isVisible())
     p.cd_btn.setChecked(False)
@@ -132,6 +136,8 @@ def main():
     pump(app, lambda: p.playing, 20)
     t0 = time.perf_counter() - p.recorder.frames / SR  # wall time of the stream's start
     check("recording with REC shown", p.recording and "REC" in p.rec_label.text())
+    check("top bar shows REC", w.prompter_btn.property("state") == "rec" and "REC" in w.prompter_btn.text())
+    w.grab().save(str(out / "0_top_bar_rec.png"))
 
     def at(i, extra=0.5):  # wait until the stream is past mark i
         while time.perf_counter() - t0 < MARKS[i] - extra:
@@ -208,6 +214,7 @@ def main():
     check("closing mid-recording saves the take", len(TakeBook.shared(w.session.path).takes) == before + 1)
     check("closing mid-recording raises no error", not errors)
     check("the window is gone", w.prompter is None)
+    check("top bar button back to closed", w.prompter_btn.property("state") == "")
     w.close()
     print("ALL PASSED" if ok else "SOME CHECKS FAILED")
     sys.exit(0 if ok else 1)

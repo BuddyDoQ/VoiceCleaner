@@ -73,6 +73,7 @@ class ProcessingSettings:
     pause_shorten: bool = False
     pause_min_s: float = DEFAULT_MIN_PAUSE_S
     pause_keep_ms: float = DEFAULT_KEEP_MS
+    deesser: float = 0.5  # 0 = off; tames harsh "s" sounds after compression
     compressor_amount: float = 0.45
     comp_threshold_db: float = -24.0
     comp_ratio: float = 2.5
@@ -121,6 +122,7 @@ class Preset:
     max_attenuation_db: float | None = None
     resynthesis: float = 0.0
     leveler: float = 0.4
+    deesser: float = 0.5
 
 
 PRESETS: dict[str, Preset] = {p.name: p for p in [
@@ -195,6 +197,7 @@ def from_preset(name: str, base: ProcessingSettings | None = None) -> Processing
         preset=p.name, compressor_amount=p.compressor_amount, comp_ratio=p.comp_ratio,
         comp_threshold_db=p.comp_threshold_db, voice_presence=p.presence, hf_clarity=p.hf_clarity,
         noise_gate_db=p.gate_db, resynthesis=p.resynthesis, leveler_amount=p.leveler,
+        deesser=p.deesser,
     )
     return apply_simple(s, p.noise, p.speech, p.room)
 

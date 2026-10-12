@@ -88,7 +88,7 @@ class CleanupParams:
 def choose_highpass(lf_cleanup: float, rumble_db: float, f0_low: float | None) -> float:
     """Adaptive high-pass cutoff: higher for rumbly recordings, but always
     safely below the speaker's lowest pitch so the voice keeps its body."""
-    cutoff = 65.0 + 35.0 * lf_cleanup
+    cutoff = 60.0 + 30.0 * lf_cleanup
     if rumble_db > 6:
         cutoff += min(15.0, (rumble_db - 6) * 1.5)
     if f0_low:
@@ -167,31 +167,34 @@ def design_voice_eq(centers: np.ndarray, measured_db: np.ndarray, params: VoiceE
 
     a = float(np.clip(params.amount, 0, 1))
     bands: list[EQBand] = []
-    # boomy / proximity-effect low end
+    # Corrections are deliberately gentle: the reference is an average of male and female
+    # voices, so a normal (especially male) voice measures "boomy" and "dull" against it.
+    # Cutting the body and lifting presence/air for that made voices thin and harsh.
+    # boomy / proximity-effect low end: only a clear excess
     low = band_dev(80, 160)
-    lf_gain = -min(max(low - 3.0, 0.0), 6.0) * a * 0.7 - 4.0 * params.lf_cleanup * a
+    lf_gain = -min(max(low - 6.0, 0.0), 6.0) * a * 0.5
     if lf_gain < -0.3:
         bands.append(EQBand("lowshelf", 160.0, lf_gain))
     # mud
     mud = band_dev(200, 500)
-    if mud > 1.5:
+    if mud > 3.0:
         sel = (centers >= 160) & (centers <= 630)
         f_mud = float(centers[sel][np.argmax(dev[sel])])
-        bands.append(EQBand("peak", f_mud, -min(mud - 1.5, 6.0) * a * 0.8, 1.0))
-    # presence (intelligibility)
+        bands.append(EQBand("peak", f_mud, -min(mud - 3.0, 6.0) * a * 0.6, 1.0))
+    # presence (intelligibility): lift only a real shortfall, tame harshness early
     pres = band_dev(2000, 5000)
     pres_gain = 0.0
-    if pres < -1.5:
-        pres_gain = min(-pres - 1.5, 5.0) * a * 0.7
-    elif pres > 3.0:
-        pres_gain = -(pres - 3.0) * a * 0.5  # tame harshness
+    if pres < -3.0:
+        pres_gain = min(-pres - 3.0, 3.0) * a * 0.5
+    elif pres > 2.0:
+        pres_gain = -min(pres - 2.0, 6.0) * a * 0.6
     pres_gain += 4.0 * params.presence
     if abs(pres_gain) > 0.3:
         bands.append(EQBand("peak", 3200.0, float(np.clip(pres_gain, -6, 6)), 0.8))
-    # air / clarity: only boost where the recording actually has content
+    # air: no automatic boost (it mostly lifted leftover hiss); Clarity adds it on request
     has_air = params.bandwidth_hz > 10000
     air = band_dev(8000, 12500)
-    air_gain = min(max(-air - 2.0, 0.0), 4.0) * a * 0.5 if has_air else 0.0
+    air_gain = -min(air - 3.0, 4.0) * a * 0.5 if has_air and air > 3.0 else 0.0  # tame sizzle
     user_hf = 4.0 * params.hf_clarity
     if user_hf > 0 and not has_air:
         user_hf = min(user_hf, 1.0)  # boosting empty highs only raises hiss

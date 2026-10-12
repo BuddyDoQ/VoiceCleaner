@@ -205,6 +205,8 @@ The guiding rule is *better speech, not obviously processed speech*.
 * **Dynamics:**
   * *Leveling* (amount, maximum correction, speed) evens out sentences and speakers.
   * *Compression* (amount, threshold, ratio, attack, release) controls word-level peaks.
+  * *De-esser* (50% by default) softens harsh "s", "sh" and "t" sounds only at the
+    moments they stick out, so the voice stays bright without sounding sharp.
 * **Advanced:** noise floor bias, spectral subtraction strength, noise gate, residual
   noise floor, presence, clarity, low-end cleanup, reverb/echo, target loudness and
   peak ceiling.
@@ -240,7 +242,8 @@ The guiding rule is *better speech, not obviously processed speech*.
   `Esc` cancel. `Space` plays whichever tab is in front (Enhance or Playback). `Ctrl+wheel` zooms the waveform.
   The menu's *Keyboard Shortcuts* (`Ctrl+/`) lists them all.
 * **Open Recent** (app menu): the last ten recordings you opened. The start screen lists
-  the last five for one-click access. VoiceCleaner reopens on the tab you used last.
+  the last five for one-click access, and next to them, under *THIS SESSION*, the
+  session's five newest recordings. VoiceCleaner reopens on the tab you used last.
 * **Quitting while working** (enhancing, exporting, a batch or a recording) asks first.
 * **Export:** tick *Show the file in Explorer when done* to go straight to the exported
   file instead of the confirmation box; the choice is remembered.
@@ -260,8 +263,10 @@ The guiding rule is *better speech, not obviously processed speech*.
   streamed to disk while recording, so an unplugged USB microphone or a crash keeps
   what was captured. Combined results are written as new files; the original is never
   changed.
-* **Teleprompter** (`Ctrl+T`, or *Teleprompter* on the start screen and in Compile): a
-  pop-out prompter that records while you read, one take per script section.
+* **Teleprompter** (`Ctrl+T`, the *TELEPROMPTER* button in the header, or *Teleprompter*
+  on the start screen and next to *Record*): a pop-out prompter that records while you
+  read, one take per script section. The header button shows when it is open, and REC
+  while it records.
   * Script format: `## Heading | Clip name` starts a section (the clip name names its
     takes), `[brackets]` are stage directions, a blank line starts a paragraph. Paste or
     edit it in the prompter (*Edit*, `E`) or open a .txt / .md file.
@@ -291,7 +296,8 @@ The guiding rule is *better speech, not obviously processed speech*.
   `Episode 12 - Rec 004 append.wav`. Names are limited to 32 characters and cleaned of
   characters Windows does not allow, so file names stay short. Sessions can be opened
   or renamed (renaming also renames the session's files). The app resumes the last
-  session on start.
+  session on start. A new session starts on the Enhance tab with nothing open: if the
+  open recording was enhanced but not exported, VoiceCleaner offers to export it first.
 * **Playback tab:** starts with the current session's recordings and exports.
   * *All Recordings* lists every session in the default recordings folder.
   * *Browse Folder…* scans any folder, including subfolders. Only WAV files that can
@@ -313,6 +319,17 @@ The guiding rule is *better speech, not obviously processed speech*.
   * **Teleprompter takes:** with *TELEPROMPTER TAKES* the list is the script, in order: one
     row per section with its selected take (enhanced when ready). Right-click a row to use
     another take; it then counts as that section's keeper.
+  * **Edit a take** (`E`, *✂ Edit Take…* or right-click): select a pop, click or a pause the
+    trimming missed and **Cut** it (`X` / `Delete`, crossfaded) or **Silence** it (`S`,
+    keeps the timing). `Ctrl`+wheel zooms to a few milliseconds; *Hear Result* plays the
+    take as it will sound. Edits are saved in the session (`compile_edits.json`); the file
+    itself is never changed.
+  * **Re-enhance** (*↻ Re-enhance*, or right-click; select several rows to do them all):
+    enhances takes again from their original recordings, with the current settings or a
+    preset, in the background. The replaced version is kept in `Exports\Previous Versions`
+    (*Revert to Previous Version* swaps it back), and take edits stay in place. *Open in
+    Enhance Tab* loads one take's recording for fine-tuning; *Update Take in Compile*
+    puts the result back.
 * **Shorten long pauses (optional, off by default):** pauses inside a recording that are
   longer than a threshold (1.0 s by default, adjustable from 0.3 to 5 s) are shortened to a natural pause (250 ms by
   default, adjustable up to 2 s). Both values are remembered between sessions. The kept pause is made of the start and end of the original silence, so
@@ -369,7 +386,8 @@ app/
     leveler.py            speech-aware dynamic leveling
     compressor.py         compressor, soft expander
     loudness.py           BS.1770-4 meter (streaming)
-    compile.py            take trimming and joining (Compile tab)
+    compile.py            take trimming, edits and joining (Compile tab)
+    deesser.py            de-esser (sibilance control)
     pauses.py             long-pause detection and shortening
     limiter.py            true-peak lookahead limiter
     quality.py            before/after metrics, QC checks, clarity estimate

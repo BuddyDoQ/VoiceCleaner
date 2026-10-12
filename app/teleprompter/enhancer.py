@@ -3,6 +3,10 @@
 Each take is enhanced with the settings of the moment it was recorded (Smart settings,
 when on, adapt them to the take) and exported as a 24-bit WAV to the session's Exports
 folder; the take book then points Compile at the enhanced file.
+
+Compile's Re-enhance uses the same queue with ``backup=True``: the new version replaces
+the enhanced file only once it is complete, and the old one is kept in
+``Exports/Previous Versions`` so it can be restored.
 """
 from __future__ import annotations
 
@@ -19,6 +23,7 @@ from ..audio.loader import load_wav
 from ..audio.pipeline import EnhancementPipeline
 from ..audio.settings import ProcessingSettings, smart_adapt
 from ..export.wav_exporter import ExportOptions, export_wav
+from ..sessions import replace_keeping_previous
 from ..utils.hardware import ensure_torch_imported
 from ..utils.logging import get_logger
 from .takes import TakeBook
@@ -32,7 +37,8 @@ class _Job:
     export: Path
     settings: ProcessingSettings
     smart: bool
-    book: TakeBook
+    book: TakeBook | None
+    backup: bool = False
 
 
 class TakeEnhancer(QObject):
@@ -53,11 +59,12 @@ class TakeEnhancer(QObject):
     def pending(self) -> int:
         return self._pending
 
-    def enqueue(self, take: Path, export: Path, settings: ProcessingSettings, smart: bool, book: TakeBook):
+    def enqueue(self, take: Path, export: Path, settings: ProcessingSettings, smart: bool, book: TakeBook | None,
+                backup: bool = False):
         with self._lock:
             self._pending += 1
         self.pendingChanged.emit(self._pending)
-        self._q.put(_Job(Path(take), Path(export), settings.copy(), smart, book))
+        self._q.put(_Job(Path(take), Path(export), settings.copy(), smart, book, backup))
 
     def shutdown(self):
         self._q.put(None)
@@ -73,8 +80,15 @@ class TakeEnhancer(QObject):
                 analysis = analyze(audio.samples, audio.sample_rate)
                 settings = smart_adapt(job.settings, analysis).settings if job.smart else job.settings
                 result = EnhancementPipeline(self._get_mm()).run(audio, analysis, settings)
-                export_wav(result.samples, result.sample_rate, job.export, ExportOptions("24", 0), source_path=job.take)
-                job.book.set_enhanced(job.take.name, job.export.name)
+                def write(path, result=result, job=job):
+                    export_wav(result.samples, result.sample_rate, path, ExportOptions("24", 0), source_path=job.take)
+
+                if job.backup:  # the new version replaces the file once complete; the old one is kept
+                    replace_keeping_previous(job.export, write)
+                else:
+                    write(job.export)
+                if job.book is not None:
+                    job.book.set_enhanced(job.take.name, job.export.name)
                 log.info("Enhanced take %s -> %s (%.1fx realtime)", job.take.name, job.export.name,
                          result.realtime_factor)
                 self.enhanced.emit(job.take.name, str(job.export))

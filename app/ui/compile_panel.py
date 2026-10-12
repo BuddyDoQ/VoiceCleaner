@@ -4,10 +4,14 @@ Starts with the current session's enhanced exports. Takes can be added from
 the session, from files (button or drag-and-drop from Explorer) or from the
 Playback tab, re-ordered by dragging, previewed and exported. Leading and
 trailing silence of every take is trimmed, keeping up to 100 ms (adjustable)
-at each end.
+at each end. Any take can be opened in the take editor to cut out or silence
+regions by hand; those edits are saved with the session. Takes can be re-enhanced
+from their original recording with the current settings or a preset (one or many at
+once); the version before is kept and can be restored.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
@@ -16,8 +20,11 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDoubleSpinBox, QFi
                                QListWidgetItem, QMenu, QPushButton, QSpinBox, QStyle, QStyledItemDelegate, QVBoxLayout,
                                QWidget)
 
-from ..audio.compile import DEFAULT_HANDLE_MS, Take, assemble, load_take, retrim
+from ..audio.compile import (DEFAULT_HANDLE_MS, Take, assemble, edits_from_seconds, edits_to_seconds, load_edits,
+                              load_take, render_take, retrim, save_edits)
 from ..audio.pauses import DEFAULT_KEEP_MS, DEFAULT_MIN_PAUSE_S, PauseSettings
+from ..audio.settings import preset_names
+from ..sessions import original_recording, previous_version
 from ..audio.loader import format_duration
 from ..utils.logging import get_logger
 from ..utils.shell import shortcut_text
@@ -31,6 +38,7 @@ log = get_logger("compile")
 PATH_ROLE = Qt.UserRole
 TITLE_ROLE = Qt.UserRole + 1  # teleprompter rows: "03 · Section · Take 2 of 3" instead of the file name
 UNIT_ROLE = Qt.UserRole + 2  # teleprompter rows: the script unit id
+EDIT_KEY_ROLE = Qt.UserRole + 3  # the user's edits are saved under this name (a take keeps them once enhanced)
 ROW_HEIGHT = 64
 WAV = (".wav", ".wave")
 
@@ -86,6 +94,8 @@ class TakeDelegate(QStyledItemDelegate):
         p.setFont(f)
         if take is None:
             detail, tone = "Loading…", theme.FAINT
+        elif path in self.panel._busy_rows():
+            detail, tone = "\u21bb Re-enhancing\u2026", theme.ACCENT
         elif take.silent:
             detail, tone = "No audible sound: will be skipped", theme.WARNING
         else:
@@ -93,6 +103,11 @@ class TakeDelegate(QStyledItemDelegate):
             detail = f"{format_duration(take.duration)} → {format_duration(take.final_duration)}   (ends −{ends:.1f} s"
             if take.cuts:
                 detail += f", {len(take.cuts)} pause{'s' if len(take.cuts) != 1 else ''} −{take.pause_seconds:.1f} s"
+            if take.edits:
+                n = len(take.edits)
+                detail += f", \u2702 {n} edit{'s' if n != 1 else ''}"
+                if take.edit_seconds >= 0.05:
+                    detail += f" −{take.edit_seconds:.1f} s"
             detail += ")"
             tone = theme.MUTED
         p.setPen(theme.qcolor(tone))
@@ -126,6 +141,14 @@ class TakeDelegate(QStyledItemDelegate):
                 p.drawRect(QRectF(xa, wr.top(), xb - xa, wr.height()))
                 p.setBrush(theme.qcolor(theme.WARNING, 200))
                 p.drawRect(QRectF(xa, wr.bottom() - 2, xb - xa, 2))
+            # the user's edits: cut (record colour) or silenced (muted), marked along the top
+            for a, b, kind in take.edits:
+                xa, xb = wr.left() + a / total * wr.width(), wr.left() + b / total * wr.width()
+                color = theme.RECORD if kind == "cut" else theme.MUTED
+                p.setBrush(theme.qcolor(theme.BG, 150))
+                p.drawRect(QRectF(xa, wr.top(), max(1.0, xb - xa), wr.height()))
+                p.setBrush(theme.qcolor(color, 230))
+                p.drawRect(QRectF(xa, wr.top(), max(2.0, xb - xa), 2))
         p.restore()
 
 
@@ -135,6 +158,7 @@ class TakeList(QListWidget):
     filesDropped = Signal(list)
     orderChanged = Signal()
     moveRequested = Signal(int)  # -1 up, +1 down (Ctrl+Up / Ctrl+Down)
+    editRequested = Signal()  # E: open the take editor
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -183,6 +207,9 @@ class TakeList(QListWidget):
         if e.key() in (Qt.Key_Up, Qt.Key_Down) and e.modifiers() & Qt.ControlModifier:
             self.moveRequested.emit(-1 if e.key() == Qt.Key_Up else 1)
             return
+        if e.key() == Qt.Key_E and not e.modifiers():
+            self.editRequested.emit()
+            return
         if e.key() == Qt.Key_Delete:
             for it in self.selectedItems():
                 self.takeItem(self.row(it))
@@ -193,13 +220,16 @@ class TakeList(QListWidget):
 
 class CompilePanel(QWidget):
     exportRequested = Signal(object, str)  # Compilation, suggested name
-    prompterRequested = Signal()
+    reenhanceRequested = Signal(list, str)  # row paths, preset name ("" = the current settings)
+    openInEnhanceRequested = Signal(str)  # row path: its original recording, to fine-tune in the Enhance tab
     playStarted = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.session = None
         self.takes: dict[str, Take] = {}
+        self.edits: dict[str, list] = {}  # the user's edits by take key (seconds), saved in the session
+        self.reenhancing: dict[str, tuple[str, str]] = {}  # new file -> (row path, recording name)
         self.compilation = None
         self._stale = False  # the preview no longer matches the list (a rebuild is on its way)
         self._generation = 0  # newest build wins; results of older builds are dropped
@@ -274,14 +304,21 @@ class CompilePanel(QWidget):
         self.src_switch.setVisible(False)  # until the session has teleprompter takes
         tools.addWidget(self.src_switch)
         tools.addSpacing(10)
+        self.edit_btn = QPushButton("\u2702 Edit Take\u2026")
+        self.edit_btn.setToolTip("Cut out or silence pops, clicks and pauses in the selected take (E)")
+        self.edit_btn.clicked.connect(self.edit_selected)
+        self.reenhance_btn = QPushButton("\u21bb Re-enhance")
+        self.reenhance_btn.setToolTip("Enhance the selected takes again from their original recordings, "
+                                      "with the current settings or a preset")
+        self.reenhance_btn.setMenu(QMenu(self.reenhance_btn))
+        self.reenhance_btn.menu().aboutToShow.connect(
+            lambda: self._fill_reenhance_menu(self.reenhance_btn.menu(), self._selected_paths()))
         self._tool_buttons = (self.add_session_btn, add_files, self.remove_btn, up, down)
         for w in (self.add_session_btn, add_files, self.remove_btn, up, down):
             tools.addWidget(w)
+        tools.addWidget(self.edit_btn)
+        tools.addWidget(self.reenhance_btn)
         tools.addStretch(1)
-        prompter = QPushButton("\u25a4 Teleprompter")
-        prompter.setToolTip("Record a script with the teleprompter: its takes appear here in script order (Ctrl+T)")
-        prompter.clicked.connect(self.prompterRequested)
-        tools.addWidget(prompter)
         tools.addWidget(clear)
         outer.addLayout(tools)
 
@@ -290,10 +327,12 @@ class CompilePanel(QWidget):
         self.list.filesDropped.connect(self.add_files)
         self.list.orderChanged.connect(self._changed)
         self.list.moveRequested.connect(self.move_selected)
+        self.list.editRequested.connect(self.edit_selected)
         self.list.itemDoubleClicked.connect(lambda it: self.preview_take(it.data(PATH_ROLE)))
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._row_menu)
-        self.list.setToolTip("Drag to reorder • Double-click to hear a take • Drop WAV files here to add them")
+        self.list.setToolTip("Drag to reorder • Double-click to hear a take • E or right-click to edit a take • "
+                             "Drop WAV files here to add them")
         outer.addWidget(self.list, 1)
         self.empty_hint = label("No takes yet. Enhance and export recordings in this session, or drop WAV files here.",
                                 "faint")
@@ -407,7 +446,38 @@ class CompilePanel(QWidget):
 
     # --- takes --------------------------------------------------------------------------
     def set_session(self, session):
+        changed = self.session is not None and (session is None or session.path != self.session.path)
         self.session = session
+        if changed:
+            self._reset_for_new_session()
+        self.edits = load_edits(session.path if session is not None else None)
+        for p, t in self.takes.items():
+            t.edits = edits_from_seconds(t, self.edits.get(self._edit_key(p)))
+
+    def _reset_for_new_session(self):
+        """Another session was opened: its takes replace the previous session's."""
+        self._rebuild_timer.stop()
+        self._script_refresh.stop()
+        for task in (self._preview_task, self._load_task):
+            if task is not None and task.running:
+                task.cancel()
+        self._generation += 1  # results of builds for the old list are dropped
+        self.player.stop()
+        self._take_preview = False
+        self.takes.clear()
+        self.compilation = None
+        self._populated_for = None
+        self.script_mode = False
+        self.src_exports.setChecked(True)
+        self.src_script.setChecked(False)
+        for b in self._tool_buttons:
+            b.setEnabled(True)
+        self.list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.src_switch.setVisible(False)
+        self.list.clear()
+        self.wave.set_overview(None)
+        self._changed()
+        self.preview_state.setText("")
 
     def ensure_populated(self):
         """First time the tab is shown for a session: its teleprompter takes in script order
@@ -469,6 +539,7 @@ class CompilePanel(QWidget):
             it.setData(PATH_ROLE, str(p))
             it.setData(TITLE_ROLE, self._title(book, u, t, p))
             it.setData(UNIT_ROLE, u["id"])
+            it.setData(EDIT_KEY_ROLE, t.file)  # the recording's name: edits carry over to the enhanced take
             it.setToolTip(f"{p}\nRight-click to use another take.")
             self.list.addItem(it)
         self._load_paths([w for w in wanted if w not in self.takes])
@@ -482,12 +553,29 @@ class CompilePanel(QWidget):
 
     def _row_menu(self, pos):
         it = self.list.itemAt(pos)
-        if it is None or not self.script_mode or self.session is None:
+        if it is None:
             return
+        m = QMenu(self)
+        path = it.data(PATH_ROLE)
+        ed = m.addAction("\u2702 Edit Take\u2026  (E)")
+        ed.setEnabled(path in self.takes)
+        ed.triggered.connect(lambda: self.edit_take(path))
+        targets = self._selected_paths() if it.isSelected() else [path]
+        n = len(targets)
+        sub = m.addMenu(f"\u21bb Re-enhance{f' {n} Takes' if n > 1 else ''}")
+        self._fill_reenhance_menu(sub, targets)
+        revertable = [p for p in targets if previous_version(Path(p)).exists() and p not in self._busy_rows()]
+        rv = m.addAction("Revert to Previous Version" + (f" ({len(revertable)})" if n > 1 and revertable else ""))
+        rv.setEnabled(bool(revertable))
+        rv.setToolTip("Swap back to the version from before the last re-enhance")
+        rv.triggered.connect(lambda: self.revert(revertable))
+        if not self.script_mode or self.session is None:
+            m.exec(self.list.viewport().mapToGlobal(pos))
+            return
+        m.addSeparator()
         unit = it.data(UNIT_ROLE)
         book = self._book()
         current = book.selected(unit)
-        m = QMenu(self)
         for t in sorted(book.takes_of(unit), key=lambda t: t.number):
             star = "  \u2605" if t.keeper else ""
             used = "  \u2190 used" if current and t.number == current.number else ""
@@ -524,6 +612,7 @@ class CompilePanel(QWidget):
         for p in new:
             it = QListWidgetItem()
             it.setData(PATH_ROLE, p)
+            it.setData(EDIT_KEY_ROLE, Path(p).name)
             it.setToolTip(p)
             it.setFlags(it.flags() | Qt.ItemIsDragEnabled)
             self.list.addItem(it)
@@ -549,6 +638,8 @@ class CompilePanel(QWidget):
 
         def done(result):
             loaded, failed = result
+            for p, t in loaded.items():
+                t.edits = edits_from_seconds(t, self.edits.get(self._edit_key(p)))
             self.takes.update(loaded)
             for p, msg in failed:
                 self._remove_path(p)
@@ -559,6 +650,129 @@ class CompilePanel(QWidget):
 
         self._load_task = run_task(work, self, on_success=done,
                                    on_progress=lambda f, m: self.preview_state.setText(m))
+        self._changed()
+
+    # --- re-enhance -------------------------------------------------------------------------
+    def _selected_paths(self) -> list[str]:
+        rows = sorted(self.list.row(i) for i in self.list.selectedItems())
+        return [self.list.item(r).data(PATH_ROLE) for r in rows]
+
+    def _busy_rows(self) -> set[str]:
+        return {row for row, _raw in self.reenhancing.values()}
+
+    def _fill_reenhance_menu(self, m: QMenu, paths: list[str]):
+        """Current settings + presets, for ``paths`` (those with an original recording)."""
+        m.clear()
+        usable = [p for p in paths if original_recording(Path(p)) is not None and p not in self._busy_rows()]
+        if not paths:
+            m.addAction("Select one or more takes first").setEnabled(False)
+            return
+        if len(paths) == 1:
+            op = m.addAction("Open in Enhance Tab\u2026")
+            op.setEnabled(bool(usable))
+            op.setToolTip("Fine-tune this take's original recording with A/B and live preview; "
+                          "then Update Take in Compile")
+            op.triggered.connect(lambda: self.openInEnhanceRequested.emit(paths[0]))
+        else:
+            m.addAction("Open in Enhance Tab (select one take)").setEnabled(False)
+        m.addSeparator()
+        if not usable:
+            m.addAction("Original recording not found" if len(paths) == 1 else
+                        "No original recordings found").setEnabled(False)
+            return
+        skipped = len(paths) - len(usable)
+        a = m.addAction("With Current Settings")
+        a.setToolTip("The settings in the Enhance tab's sidebar (Smart adapts them to each take when on)")
+        a.triggered.connect(lambda: self.reenhanceRequested.emit(usable, ""))
+        pm = m.addMenu("With Preset")
+        for name in preset_names():
+            pm.addAction(name).triggered.connect(lambda _=False, n=name: self.reenhanceRequested.emit(usable, n))
+        if skipped:
+            m.addSeparator()
+            m.addAction(f"{skipped} take{'s' if skipped != 1 else ''} skipped: original not found or busy"
+                        ).setEnabled(False)
+        m.setToolTipsVisible(True)
+
+    def mark_reenhancing(self, row: str, new_file: str, recording: str):
+        self.reenhancing[new_file] = (row, recording)
+        self.list.viewport().update()
+
+    def on_take_enhanced(self, _recording: str, new_file: str):
+        """A re-enhanced take is ready: the row now uses the new file."""
+        entry = self.reenhancing.pop(new_file, None)
+        if entry is None:
+            return
+        row = entry[0]
+        if row != new_file:  # a recording was in the list: it is replaced by its enhanced version
+            for i in range(self.list.count()):
+                if self.list.item(i).data(PATH_ROLE) == row:
+                    self.list.item(i).setData(PATH_ROLE, new_file)
+            self.takes.pop(row, None)
+        self.reload_take(new_file)
+
+    def on_take_failed(self, recording: str, message: str):
+        for new_file, (_row, rec) in list(self.reenhancing.items()):
+            if rec == recording:
+                del self.reenhancing[new_file]
+                self.preview_state.setText(f"Re-enhancing {recording} failed: {message}")
+        self.list.viewport().update()
+
+    def reload_take(self, path: str):
+        """Read ``path`` again (its file changed); its edits are kept."""
+        if self._take_preview:
+            self.player.stop()
+        self.takes.pop(path, None)
+        self._load_paths([path])
+
+    def revert(self, paths: list[str]):
+        """Swap each take with the version from before its last re-enhance."""
+        failed = []
+        for p in paths:
+            cur, prev = Path(p), previous_version(Path(p))
+            if not prev.exists():
+                continue
+            tmp = prev.with_name(prev.stem + ".swap.wav")
+            try:
+                os.replace(cur, tmp)
+                os.replace(prev, cur)
+                os.replace(tmp, prev)
+            except OSError as exc:
+                failed.append(f"{cur.name}: {exc}")
+                if tmp.exists() and not cur.exists():
+                    os.replace(tmp, cur)
+                continue
+            self.reload_take(p)
+        if failed:
+            self.preview_state.setText("Could not revert " + "; ".join(failed))
+
+    def _edit_key(self, path: str) -> str:
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            if it.data(PATH_ROLE) == path:
+                return it.data(EDIT_KEY_ROLE) or Path(path).name
+        return Path(path).name
+
+    def edit_selected(self):
+        it = self.list.currentItem() or (self.list.selectedItems() or [None])[0]
+        if it is not None:
+            self.edit_take(it.data(PATH_ROLE))
+
+    def edit_take(self, path: str):
+        """Open the take editor; the edits are kept with the session."""
+        from .take_editor import edit_take
+
+        take = self.takes.get(path)
+        if take is None:
+            return
+        self.pause()
+        title = next((self.list.item(i).data(TITLE_ROLE) for i in range(self.list.count())
+                      if self.list.item(i).data(PATH_ROLE) == path), None) or Path(path).name
+        edits = edit_take(take, title, self)
+        if edits is None or edits == take.edits:
+            return
+        take.edits = edits
+        self.edits[self._edit_key(path)] = edits_to_seconds(take)
+        save_edits(self.session.path if self.session is not None else None, self.edits)
         self._changed()
 
     def _remove_path(self, p: str):
@@ -760,7 +974,7 @@ class CompilePanel(QWidget):
         if t is None or t.silent:
             return
         self._take_preview = True
-        self.player.set_source("original", t.samples[t.start:t.end], t.sample_rate)
+        self.player.set_source("original", render_take(t), t.sample_rate)
         self.player.set_active("original")
         self.player.seek(0)
         self.preview_state.setText(f"Playing trimmed take: {Path(path).name}")

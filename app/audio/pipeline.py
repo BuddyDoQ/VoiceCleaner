@@ -25,6 +25,7 @@ from . import loudness, noise_profile as noise_profile_mod, quality
 from .analyzer import FRAME_HOP_S, AnalysisResult, estimate_rt60, mask_to_regions
 from .dsp import analysis_fft_size, band_edges_bins, db, iter_power_frames
 from .compressor import Compressor, CompressorParams, GateParams, NoiseGate
+from .deesser import DeEsser, DeEsserParams
 from .denoise import DenoiseParams, SpectralDenoiser, TransientSuppressor
 from .dereverb import DereverbParams, Dereverberator
 from .dsp import process_in_chunks
@@ -536,6 +537,8 @@ class EnhancementPipeline:
                                                ratio=s.comp_ratio, attack_ms=s.comp_attack_ms,
                                                release_ms=s.comp_release_ms))
         comp.process(y, out=y)
+        # compression lifts consonants against vowels: take the edge off sibilants
+        DeEsser(sr, DeEsserParams(amount=s.deesser)).process(y, out=y)
         prog("dynamics", 0.7, "Balancing levels...")
         NoiseGate(sr, GateParams(threshold_db=s.noise_gate_db)).process(y, out=y)
         prog("dynamics", 1.0, "Balancing levels...")

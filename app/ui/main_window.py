@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import QByteArray, QEvent, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QFont, QFontMetrics, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QButtonGroup, QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
                                QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
                                QSlider, QStackedWidget, QTabWidget, QToolButton, QVBoxLayout, QWidget)
@@ -72,6 +72,7 @@ SHORTCUTS = [
     ("Ctrl+/", "This list"),
     ("Ctrl+mouse wheel", "Zoom the waveform"),
     ("Double-click a slider", "Reset it to the preset's value"),
+    ("E (Compile)", "Edit the selected take: X cut, S silence, Ctrl+Z undo"),
 ]
 
 
@@ -93,9 +94,12 @@ class MainWindow(QMainWindow):
         self._batch = None
         self._result_settings: dict | None = None
         self._enh_overview = None  # the enhanced track's waveform without a live preview
+        self._exported_result = None  # the enhanced result last exported (to warn before discarding others)
+        self._after_export = None  # runs after the Enhance tab's export succeeds (e.g. switch session)
+        self._compile_link = None  # (recording, enhanced file, Compile row) when opened from Compile
         self._preview_task = None
         self._preview_gen = 0
-        self._export_after_enhance = False
+        self._export_after_enhance = None  # what to finish once "Enhance Again" is done (export / update)
         self._pending_update = None
         self.prompter = None  # the teleprompter window, while open
         from ..teleprompter.enhancer import TakeEnhancer
@@ -103,6 +107,7 @@ class MainWindow(QMainWindow):
         self.take_enhancer = TakeEnhancer(self._get_model_manager, self)
         self.take_enhancer.enhanced.connect(self._take_enhanced)
         self.take_enhancer.failed.connect(lambda name, msg: log.warning("Take %s not enhanced: %s", name, msg))
+        self.take_enhancer.failed.connect(lambda name, msg: self.compile_panel.on_take_failed(name, msg))
         self.take_enhancer.pendingChanged.connect(self._takes_pending)  # (plan, installer, version, relaunch): installed when the app closes
         self._pending_warnings: list[str] = []
         self._last_notes: list[str] = []
@@ -142,7 +147,8 @@ class MainWindow(QMainWindow):
         if isinstance(self.config.extra.get("compile"), dict):
             self.compile_panel.restore_options(self.config.extra["compile"])
         self.compile_panel.exportRequested.connect(self._export_compilation)
-        self.compile_panel.prompterRequested.connect(self.open_teleprompter)
+        self.compile_panel.reenhanceRequested.connect(self._reenhance_takes)
+        self.compile_panel.openInEnhanceRequested.connect(self.open_take_in_enhance)
         self.compile_panel.playStarted.connect(self._compile_play_started)
         self.playback.addToCompile.connect(self._add_to_compile)
         self.tabs.addTab(self.compile_panel, "COMPILE")
@@ -179,6 +185,7 @@ class MainWindow(QMainWindow):
                                                                          self.compile_panel.pause()))
         self.playback.set_session(self.session, sessions.sessions_root())
         self.compile_panel.set_session(self.session)
+        self._refresh_session_recordings()
         last = self.config.extra.get("last_tab", 0)
         if isinstance(last, int) and 0 < last < self.tabs.count():
             self.tabs.setCurrentIndex(last)  # where the user left off
@@ -215,6 +222,19 @@ class MainWindow(QMainWindow):
         self.session_btn.setMenu(self._build_session_menu())
         lay.addWidget(self.session_btn)
         self._update_session_ui()
+        self.prompter_btn = QPushButton()
+        self.prompter_btn.setProperty("role", "session")
+        self.prompter_btn.setCursor(Qt.PointingHandCursor)
+        self.prompter_btn.clicked.connect(self.open_teleprompter)
+        self.prompter_btn.ensurePolished()
+        # one width for every state, so the header never shifts
+        bold = QFont(self.prompter_btn.font())
+        bold.setBold(True)  # the recording state is bold
+        widest = max(QFontMetrics(bold).horizontalAdvance(t)
+                     for t in ("\u25a4  TELEPROMPTER", "\u25cf  REC \u00b7 TELEPROMPTER"))
+        self.prompter_btn.setFixedWidth(widest + 30)
+        lay.addWidget(self.prompter_btn)
+        self._update_prompter_button()
         lay.addStretch(1)
         self.activity_chip = QPushButton()
         self.activity_chip.setProperty("role", "activity")
@@ -259,7 +279,7 @@ class MainWindow(QMainWindow):
         m.addAction("Open WAV…", self.choose_file, QKeySequence.Open)
         self.recent_menu = m.addMenu("Open Recent")
         self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
-        self.export_action = m.addAction("Export Enhanced Audio…", self.export, QKeySequence("Ctrl+E"))
+        self.export_action = m.addAction("Export Enhanced Audio…", lambda: self.export(), QKeySequence("Ctrl+E"))
         m.addSeparator()
         dev = m.addMenu("Processing device")
         group = QActionGroup(self)
@@ -398,6 +418,11 @@ class MainWindow(QMainWindow):
             self.record_toggle.toggled.connect(self._show_record_panel)
             reserve_bold_width(self.record_toggle)  # bold and red while the recorder is open
             head.addWidget(self.record_toggle)
+            prompter = QPushButton("\u25a4  Teleprompter")
+            prompter.setCursor(Qt.PointingHandCursor)
+            prompter.setToolTip(f"Read a script while it records, one take per section ({shortcut_text('Ctrl+T')})")
+            prompter.clicked.connect(self.open_teleprompter)
+            head.addWidget(prompter)
         play = QPushButton("▶  Play")
         play.setProperty("role", "ghost")
         play.setToolTip(f"Play the {source} audio")
@@ -616,9 +641,16 @@ class MainWindow(QMainWindow):
         a.addLayout(row)
         self.export_btn = QPushButton("Export Enhanced WAV…")
         self.export_btn.setCursor(Qt.PointingHandCursor)
-        self.export_btn.clicked.connect(self.export)
+        self.export_btn.clicked.connect(lambda: self.export())
         a.addWidget(self.export_btn)
-        for b in (self.enhance_btn, self.cancel_btn, self.export_btn):
+        self.update_take_btn = QPushButton("\u21bb Update Take in Compile")
+        self.update_take_btn.setCursor(Qt.PointingHandCursor)
+        self.update_take_btn.setToolTip("Replace this take's enhanced version in Compile with this result "
+                                        "(the version it replaces is kept; trims stay in place)")
+        self.update_take_btn.clicked.connect(self.update_take_in_compile)
+        self.update_take_btn.setVisible(False)
+        a.addWidget(self.update_take_btn)
+        for b in (self.enhance_btn, self.cancel_btn, self.export_btn, self.update_take_btn):
             b.setSizePolicy(b.sizePolicy().horizontalPolicy(), QSizePolicy.Fixed)
             b.setMinimumHeight(b.sizeHint().height())
         actions.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
@@ -650,6 +682,7 @@ class MainWindow(QMainWindow):
 
     # ============================================================================ state
     def _set_empty_state(self):
+        self._refresh_session_recordings()
         self.stack.setCurrentIndex(0)
         self.enhance_btn.setEnabled(False)
         self.export_btn.setEnabled(False)
@@ -677,6 +710,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText(message)
         has_result = self.result is not None
         self.export_btn.setEnabled(not busy and has_result)
+        self.update_take_btn.setEnabled(not busy and has_result)
         self.export_action.setEnabled(not busy and has_result)
         self.learn_btn.setEnabled(not busy and self.audio is not None)
 
@@ -864,6 +898,9 @@ class MainWindow(QMainWindow):
 
     def _file_loaded(self, payload):
         audio, analysis, overview = payload
+        if self._compile_link is not None and Path(audio.info.path) != self._compile_link[0]:
+            self._compile_link = None  # another recording: no longer a Compile take
+        self.update_take_btn.setVisible(self._compile_link is not None)
         self.audio, self.analysis = audio, analysis
         self.result = None
         self.learned_profile = None
@@ -987,9 +1024,9 @@ class MainWindow(QMainWindow):
             f"{result.realtime_factor:.1f}x realtime • {result.device_label}")
         if result.attempts > 1:
             self.speed_label.setText(self.speed_label.text() + f" • Quality check adjusted settings ({result.attempts} passes).")
-        if self._export_after_enhance:
-            self._export_after_enhance = False
-            QTimer.singleShot(0, self.export)
+        if self._export_after_enhance is not None:
+            then, self._export_after_enhance = self._export_after_enhance, None
+            QTimer.singleShot(0, then)
 
     def cancel_task(self):
         if self._task_running():
@@ -1107,17 +1144,41 @@ class MainWindow(QMainWindow):
         self.prompter.takeSaved.connect(self._prompter_take)
         self.prompter.scriptChanged.connect(self.compile_panel.takes_changed)
         self.prompter.recordingChanged.connect(self._prompter_recording)
-        self.prompter.closed.connect(lambda: setattr(self, "prompter", None))  # before Qt deletes it
+        self.prompter.closed.connect(self._prompter_closed)  # before Qt deletes it
         self.prompter.setAttribute(Qt.WA_DeleteOnClose)
         self.prompter.show()
         self.prompter.raise_()
         self.prompter.activateWindow()
+        self._update_prompter_button()
 
     def _prompter_recording(self, on: bool):
         if on:
             self.activity.start("prompter", "Teleprompter recording", None, fraction=None)
         else:
             self.activity.finish("prompter")
+        self._update_prompter_button(recording=on)
+
+    def _prompter_closed(self):
+        self.prompter = None
+        self.activity.finish("prompter")
+        self._update_prompter_button()
+
+    def _update_prompter_button(self, recording: bool = False):
+        """Closed: opens it. Open: brings it to the front (accent). Recording: red REC."""
+        if not hasattr(self, "prompter_btn"):
+            return
+        b = self.prompter_btn
+        is_open = getattr(self, "prompter", None) is not None
+        state = "rec" if is_open and recording else "open" if is_open else ""
+        b.setText("\u25cf  REC \u00b7 TELEPROMPTER" if state == "rec" else "\u25a4  TELEPROMPTER")
+        tips = {"": f"Read a script while it records, one take per section ({shortcut_text('Ctrl+T')})",
+                "open": "The teleprompter is open: click to bring it to the front",
+                "rec": "The teleprompter is recording: click to bring it to the front"}
+        b.setToolTip(tips[state])
+        if b.property("state") != state:
+            b.setProperty("state", state)
+            b.style().unpolish(b)
+            b.style().polish(b)
 
     def _prompter_take(self, info, path: Path):
         """A take was saved: enhance it in the background; Compile and Playback show it."""
@@ -1129,10 +1190,102 @@ class MainWindow(QMainWindow):
                                    book)
         self.compile_panel.takes_changed()
         self.playback.refresh()
+        self._refresh_session_recordings()
 
-    def _take_enhanced(self, _take: str, _path: str):
+    def _take_enhanced(self, take: str, path: str):
+        self.compile_panel.on_take_enhanced(take, path)
         self.compile_panel.takes_changed()
         self.playback.refresh()
+
+    def _reenhance_takes(self, paths: list, preset: str):
+        """Compile's Re-enhance: each take from its original recording, in the background.
+        An enhanced file is replaced (the old version is kept); a recording gets one."""
+        from ..audio.settings import from_preset
+        from ..teleprompter.takes import TakeBook
+
+        current = self.settings_panel.current()
+        settings = from_preset(preset, base=current) if preset else current
+        smart = self.settings_panel.smart.isChecked()
+        book = TakeBook.shared(self.session.path)
+        queued = 0
+        for p in paths:
+            row = Path(p)
+            raw = sessions.original_recording(row)
+            if raw is None:
+                continue
+            target = self._enhanced_target(row, raw)
+            mine = raw.parent == self.session.recordings_dir
+            self.take_enhancer.enqueue(raw, target, settings, smart, book if mine else None, backup=True)
+            self.compile_panel.mark_reenhancing(str(row), str(target), raw.name)
+            queued += 1
+        what = f"preset \u201c{preset}\u201d" if preset else "the current settings"
+        self.status_label.setText(f"Re-enhancing {queued} take{'s' if queued != 1 else ''} with {what}\u2026")
+
+    def _enhanced_target(self, row: Path, raw: Path) -> Path:
+        """The enhanced file a Compile row stands for: the row itself when it is enhanced,
+        else the recording's enhanced version (existing, or a new name)."""
+        from ..teleprompter.takes import TakeBook
+
+        if row.parent.name == sessions.EXPORTS:
+            return row
+        take = next((t for t in TakeBook.shared(self.session.path).takes if t.file == raw.name and t.enhanced), None)
+        return (self.session.exports_dir / take.enhanced) if take else self.session.export_path(raw)
+
+    def open_take_in_enhance(self, row_path: str):
+        """Compile: fine-tune a take from its original recording in the Enhance tab."""
+        row = Path(row_path)
+        raw = sessions.original_recording(row)
+        if raw is None:
+            return
+
+        def go():
+            self._compile_link = (raw, self._enhanced_target(row, raw), row)
+            self.tabs.setCurrentIndex(0)
+            self.open_file(raw)
+            self.status_label.setText("Opened from Compile. Enhance, then Update Take in Compile.")
+
+        if self.audio is not None and Path(self.audio.info.path) == raw:
+            self._compile_link = (raw, self._enhanced_target(row, raw), row)
+            self.update_take_btn.setVisible(True)
+            self.tabs.setCurrentIndex(0)
+            return
+        if self._confirm_leave_recording(go, "open this take"):
+            go()
+
+    def update_take_in_compile(self):
+        """Write the result over the take's enhanced file (keeping the one before) and show
+        it in Compile."""
+        if self.result is None or self._compile_link is None or self._task_running():
+            return
+        if self.enhance_btn.text() == "Enhance Again" and not self._confirm_export_stale(self.update_take_in_compile):
+            return
+        raw, target, row = self._compile_link
+        result = self.result
+        self._begin_job("export", "Updating take")
+        self._busy(True, "Updating take...")
+
+        def work(ctx):
+            ctx.progress(0.1, "Updating take...")
+            sessions.replace_keeping_previous(target, lambda p: export_wav(
+                result.samples, result.sample_rate, p, ExportOptions("24", 0), source_path=raw))
+            return target
+
+        def done(_path):
+            from ..teleprompter.takes import TakeBook
+
+            self._exported_result = result
+            if raw.parent == self.session.recordings_dir:
+                TakeBook.shared(self.session.path).set_enhanced(raw.name, target.name)
+            self._busy(False, f"Updated {target.name} in Compile.")
+            self.compile_panel.mark_reenhancing(str(row), str(target), raw.name)
+            self.compile_panel.on_take_enhanced(raw.name, str(target))
+            self.compile_panel.takes_changed()
+            self.playback.refresh()
+            self._compile_link = (raw, target, target)  # the row now uses the enhanced file
+            self.tabs.setCurrentWidget(self.compile_panel)
+
+        self.task = run_task(work, self, on_success=done, on_error=self._task_failed,
+                             on_progress=self._on_progress)
 
     def _takes_pending(self, n: int):
         if n > 0:
@@ -1264,7 +1417,7 @@ class MainWindow(QMainWindow):
             self.wave_enh.set_overview(self._enh_overview, keep_view=True)
         self.wave_enh.update()
 
-    def _confirm_export_stale(self) -> bool:
+    def _confirm_export_stale(self, then=None) -> bool:
         """Settings changed since the last Enhance: offer to apply them before exporting."""
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Question)
@@ -1278,7 +1431,7 @@ class MainWindow(QMainWindow):
         box.setDefaultButton(again)
         box.exec()
         if box.clickedButton() is again:
-            self._export_after_enhance = True
+            self._export_after_enhance = then or (lambda: self.export())
             self.enhance()
             return False
         return box.clickedButton() is old
@@ -1488,7 +1641,8 @@ class MainWindow(QMainWindow):
                              on_finished=open_when_finished)
 
     # ============================================================================ export
-    def export(self):
+    def export(self, then=None):
+        """Export the enhanced recording; ``then`` runs once it is saved."""
         if self.result is None or self._task_running():
             return
         if self.enhance_btn.text() == "Enhance Again" and not self._confirm_export_stale():
@@ -1525,8 +1679,19 @@ class MainWindow(QMainWindow):
             return export_wav(samples, result.sample_rate, v["path"],
                               ExportOptions(v["bit_depth"], v["sample_rate"]), source_path=source, progress=prog)
 
-        self.task = run_task(work, self, on_success=self._exported, on_error=self._task_failed,
+        def saved(path):
+            self._exported_result = result
+            self._exported(path)
+            if callable(then):
+                then()
+
+        self.task = run_task(work, self, on_success=saved, on_error=self._task_failed,
                              on_progress=self._on_progress)
+
+    @property
+    def unexported_result(self) -> bool:
+        """An enhanced version exists that has not been exported."""
+        return self.result is not None and self.result is not self._exported_result
 
     @property
     def _reveal_after_export(self) -> bool:
@@ -1743,7 +1908,69 @@ class MainWindow(QMainWindow):
             self.session_btn.setText(f"SESSION \u00b7 {self.session.name}  \u25be")
         self._update_title()
 
-    def _switch_session(self, session):
+    def _confirm_leave_recording(self, proceed, action: str) -> bool:
+        """Before the open recording is closed: if its enhanced version was never exported,
+        offer to export it first. True when ``proceed`` may run now; after an export it runs
+        once the file is saved."""
+        if self._task_running():
+            self._error("Busy", f"Wait until processing has finished, then {action}.")
+            return False
+        if not self.unexported_result:
+            return True
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Enhanced audio not exported")
+        box.setText(f"<b>\u201c{self.audio.info.path.name}\u201d has been enhanced but not exported.</b>")
+        box.setInformativeText(f"It will be closed when you {action}. Export the enhanced version first?")
+        export_btn = box.addButton("Export\u2026", QMessageBox.AcceptRole)
+        discard = box.addButton("Don\u2019t Export", QMessageBox.DestructiveRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(export_btn)
+        box.exec()
+        if box.clickedButton() is export_btn:
+            self.tabs.setCurrentIndex(0)
+            self.export(then=proceed)
+            return False
+        return box.clickedButton() is discard
+
+    def close_recording(self):
+        """Back to the empty Enhance tab (a new or another session was opened)."""
+        if self.audio is None:
+            return
+        self._cancel_preview(wait=True)
+        self.player.stop()
+        self.player.set_source("enhanced", None)
+        self.player.set_source("original", None)
+        self.audio = self.analysis = self.result = None
+        self._exported_result = None
+        self._compile_link = None
+        self.update_take_btn.setVisible(False)
+        self.learned_profile = None
+        self.selection = None
+        self._enh_overview = None
+        self.profile_label.setText("")
+        self.warning_label.setVisible(False)
+        self.file_name.setText("")
+        self.file_name.setToolTip("")
+        while self.meta_chips.count():
+            item = self.meta_chips.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.wave_enh.preview_region = None
+        for w in (self.wave_orig, self.wave_enh):
+            w.set_busy("")
+            w.set_selection(None)
+            w.highlight_regions = []
+            w.set_overview(None)
+        self.metrics.set_enhanced(None)
+        self.metrics.set_score(None, None)
+        self.record_panel.set_original(False, 0.0)
+        self.settings_panel.set_analysis(None)
+        self._set_empty_state()
+
+    def _switch_session(self, session, keep_recording: bool = False):
+        if not keep_recording:
+            self.close_recording()  # the open recording belongs to the previous session
         if self.prompter is not None:
             self.prompter.close()  # its takes belong to the previous session
         self.session = session
@@ -1751,6 +1978,7 @@ class MainWindow(QMainWindow):
         self._update_session_ui()
         self.playback.set_session(session, sessions.sessions_root())
         self.compile_panel.set_session(session)
+        self._refresh_session_recordings()
         if self.tabs.currentWidget() is self.compile_panel:
             self.compile_panel.ensure_populated()
         self.status_label.setText(f"Session \u201c{session.name}\u201d. New recordings and exports go to its folder.")
@@ -1764,10 +1992,17 @@ class MainWindow(QMainWindow):
         dlg = SessionNameDialog("New Session", sessions.default_name(), "Create Session", self)
         if dlg.exec() != SessionNameDialog.Accepted:
             return
-        try:
-            self._switch_session(sessions.create(dlg.name))
-        except (sessions.SessionError, OSError) as exc:
-            self._error("Could not create the session", str(exc))
+        name = dlg.name
+
+        def go():
+            try:
+                self._switch_session(sessions.create(name))
+                self.tabs.setCurrentIndex(0)  # a new session starts on the Enhance tab
+            except (sessions.SessionError, OSError) as exc:
+                self._error("Could not create the session", str(exc))
+
+        if self._confirm_leave_recording(go, "start a new session"):
+            go()
 
     def open_session_dialog(self):
         if self.record_panel.recording:
@@ -1776,10 +2011,18 @@ class MainWindow(QMainWindow):
         dlg = OpenSessionDialog(self.session.name, self)
         if dlg.exec() != OpenSessionDialog.Accepted or not dlg.chosen:
             return
-        try:
-            self._switch_session(sessions.open_session(Path(dlg.chosen)))
-        except (sessions.SessionError, OSError) as exc:
-            self._error("Could not open the session", str(exc))
+        chosen = Path(dlg.chosen)
+        if chosen == self.session.path:
+            return  # already open: keep the recording
+
+        def go():
+            try:
+                self._switch_session(sessions.open_session(chosen))
+            except (sessions.SessionError, OSError) as exc:
+                self._error("Could not open the session", str(exc))
+
+        if self._confirm_leave_recording(go, "open another session"):
+            go()
 
     def rename_session(self):
         if self.record_panel.recording or self._task_running():
@@ -1792,7 +2035,7 @@ class MainWindow(QMainWindow):
         if loaded_inside:
             self.player.stop()
         try:
-            self._switch_session(sessions.rename(self.session, dlg.name))
+            self._switch_session(sessions.rename(self.session, dlg.name), keep_recording=True)
         except (sessions.SessionError, OSError) as exc:
             self._error("Could not rename the session", f"{exc}\n\nClose any program using files in the session folder.")
 
@@ -1823,6 +2066,8 @@ class MainWindow(QMainWindow):
     # ============================================================================ tabs / playback
     def _tab_changed(self, index: int):
         page = self.tabs.widget(index)
+        if index == 0 and self.audio is None:
+            self._refresh_session_recordings()  # recordings may have been added elsewhere
         if page is self.batch_page and self.sidebar.parent() is not self.batch_page:
             self._batch_layout.addWidget(self.sidebar)
             self.sidebar_actions.setVisible(False)
@@ -1927,6 +2172,18 @@ class MainWindow(QMainWindow):
         return s
 
     # ============================================================================ recent files
+    def _refresh_session_recordings(self):
+        """The drop zone's THIS SESSION column: the session's newest recordings."""
+        session = getattr(self, "session", None)
+        files = []
+        if session is not None:
+            try:
+                files = sorted((p for p in session.recordings_dir.glob("*.wav") if p.is_file()),
+                               key=lambda p: p.stat().st_mtime, reverse=True)
+            except OSError:
+                files = []
+        self.drop_zone.set_session_recordings(files, session.name if session is not None else "")
+
     def _remember_recent(self, path: Path):
         items = [p for p in self.config.extra.get("recent_files", []) if isinstance(p, str)]
         p = str(path)

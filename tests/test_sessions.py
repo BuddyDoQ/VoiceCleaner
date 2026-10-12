@@ -70,3 +70,29 @@ def test_list_and_default_name(tmp_path):
     n1 = sessions.default_name(tmp_path)
     create(n1, tmp_path)
     assert sessions.default_name(tmp_path) != n1
+
+
+def test_original_recording_of_enhanced_takes(tmp_path):
+    s = create("Show", tmp_path)
+    rec = s.recording_path()
+    rec.write_bytes(b"x")
+    exp = s.export_path(rec)
+    exp.write_bytes(b"y")
+    assert sessions.original_recording(exp) == rec
+    second = s.export_path(rec)  # "... enhanced (2).wav"
+    second.write_bytes(b"y")
+    assert sessions.original_recording(second) == rec
+    assert sessions.original_recording(rec) == rec  # a recording is its own original
+    # long names are shortened in export names
+    long_rec = s.recordings_dir / f"{s.name} - {'A very long take name ' * 4}.wav"
+    long_rec.write_bytes(b"x")
+    assert sessions.original_recording(s.export_path(long_rec)) == long_rec
+    # not from a session recording
+    other = s.exports_dir / f"{s.name} - imported enhanced.wav"
+    assert sessions.original_recording(other) is None
+    assert sessions.original_recording(tmp_path / "loose.wav") is None
+
+
+def test_previous_version_location(tmp_path):
+    p = tmp_path / "Exports" / "a enhanced.wav"
+    assert sessions.previous_version(p) == tmp_path / "Exports" / "Previous Versions" / "a enhanced.wav"

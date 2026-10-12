@@ -80,6 +80,7 @@ class WaveformView(QWidget):
     selectionChanged = Signal(object)  # (start, end) seconds or None
     viewChanged = Signal(float, float)  # visible (t0, t1)
     activated = Signal()
+    MIN_SELECTION_S = 0.05  # shorter drags are dropped
 
     def __init__(self, color_role: str, placeholder: str = "", parent=None):
         """``color_role`` is "original" or "enhanced"; the colour follows the theme."""
@@ -405,7 +406,7 @@ class WaveformView(QWidget):
             return
         if abs(e.position().x() - self._drag_px) <= 4:
             self.seekRequested.emit(self._x_to_t(e.position().x()))
-        elif self.selection and self.selection[1] - self.selection[0] < 0.05:
+        elif self.selection and self.selection[1] - self.selection[0] < self.MIN_SELECTION_S:
             self.selection = None
             self.selectionChanged.emit(None)
         self._drag_start = None

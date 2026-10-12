@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 import soundfile as sf
@@ -132,3 +134,72 @@ def test_pause_shortening_in_compilation(tmp_path):
     assert abs(comp.pause_seconds - 2.75) < 0.05
     retrim(short, 100, PauseSettings())  # turning it off again restores the pause
     assert short.cuts == []
+
+
+# --- the user's own edits (take editor) ---------------------------------------------------
+def _edit_take(sr=48000):
+    from app.audio.compile import Take
+
+    t = np.arange(sr * 3) / sr
+    x = (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)[:, None]
+    return Take(Path("t.wav"), x, sr, 0, x.shape[0])
+
+
+def test_cut_edit_removes_region_and_counts():
+    from app.audio.compile import render_take
+
+    take = _edit_take()
+    take.edits = [(48000, 72000, "cut")]  # 0.5 s
+    assert abs(take.final_duration - 2.5) < 1e-6
+    assert abs(take.edit_seconds - 0.5) < 1e-6
+    assert render_take(take).shape[0] == 3 * 48000 - 24000
+
+
+def test_mute_edit_keeps_length_and_silences():
+    from app.audio.compile import render_take
+
+    take = _edit_take()
+    take.edits = [(48000, 96000, "mute")]
+    y = render_take(take)
+    assert y.shape[0] == take.samples.shape[0]
+    assert np.abs(y[49000:95000]).max() == 0.0
+    assert np.abs(y[:47000]).max() > 0.2  # untouched outside
+
+
+def test_cuts_overlapping_pauses_are_not_counted_twice():
+    from app.audio.compile import render_take
+
+    take = _edit_take()
+    take.cuts = [(48000, 72000)]
+    take.edits = [(60000, 96000, "cut")]
+    assert take.removals() == [(48000, 96000)]
+    assert abs(take.edit_seconds - 0.5) < 1e-6
+    assert render_take(take).shape[0] == 3 * 48000 - 48000
+
+
+def test_edits_outside_trimmed_range_are_ignored():
+    take = _edit_take()
+    take.start, take.end = 48000, 96000
+    take.edits = [(0, 24000, "cut")]
+    assert take.removals() == []
+
+
+def test_add_edit_merges_same_kind():
+    from app.audio.compile import add_edit
+
+    e = add_edit([], 100, 200, "cut")
+    e = add_edit(e, 150, 300, "cut")
+    e = add_edit(e, 250, 260, "mute")
+    assert e == [(100, 300, "cut"), (250, 260, "mute")]
+
+
+def test_edits_saved_and_loaded_in_seconds(tmp_path):
+    from app.audio.compile import edits_from_seconds, edits_to_seconds, load_edits, save_edits
+
+    take = _edit_take()
+    take.edits = [(48000, 72000, "cut"), (96000, 100800, "mute")]
+    save_edits(tmp_path, {"t.wav": edits_to_seconds(take)})
+    loaded = load_edits(tmp_path)
+    assert edits_from_seconds(take, loaded["t.wav"]) == take.edits
+    (tmp_path / "compile_edits.json").write_text("{broken", encoding="utf-8")
+    assert load_edits(tmp_path) == {}

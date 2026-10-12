@@ -9,7 +9,9 @@ For every take:
      it, so breaths and soft consonant onsets are not clipped;
   3. optionally shorten long pauses inside the take (off unless chosen, see
      :mod:`app.audio.pauses`);
-  4. apply 5 ms fades at the new edges so joins never click.
+  4. apply the user's own edits: regions cut out (a pop, a stumble, silence the
+     detection missed) or silenced in place (keeps the timing);
+  5. apply 5 ms fades at the new edges so joins never click.
 
 Takes are converted to a common sample rate and channel count (the first
 take's rate, the widest channel layout), optionally levelled to the same
@@ -18,6 +20,7 @@ limiter so level matching can never clip.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from math import gcd
 from pathlib import Path
@@ -45,6 +48,7 @@ class Take:
     lufs: float = float("-inf")
     overview: np.ndarray = field(default_factory=lambda: np.zeros(0, np.float32), repr=False)
     cuts: list = field(default_factory=list)  # long inner pauses to remove, absolute [a, b)
+    edits: list = field(default_factory=list)  # the user's edits: (a, b, "cut" | "mute"), absolute samples
 
     @property
     def duration(self) -> float:
@@ -59,14 +63,62 @@ class Take:
     def pause_seconds(self) -> float:
         return removed_samples(self.cuts) / self.sample_rate
 
+    def removals(self) -> list[tuple[int, int]]:
+        """Everything taken out inside the trimmed range: shortened pauses and the user's
+        cuts, clipped to the range, sorted and merged."""
+        spans = list(self.cuts) + [(a, b) for a, b, kind in self.edits if kind == "cut"]
+        return merge_spans(spans, self.start, self.end)
+
+    @property
+    def edit_seconds(self) -> float:
+        """Removed by the user's cuts (beyond what pause shortening already removes)."""
+        return max(0, removed_samples(self.removals()) - removed_samples(self.cuts)) / self.sample_rate
+
     @property
     def final_duration(self) -> float:
-        """Length in the compilation: ends trimmed and long pauses shortened."""
-        return max(0.0, self.trimmed_duration - self.pause_seconds)
+        """Length in the compilation: ends trimmed, long pauses shortened, cuts removed."""
+        return max(0.0, self.trimmed_duration - removed_samples(self.removals()) / self.sample_rate)
 
     @property
     def silent(self) -> bool:
         return self.end <= self.start
+
+
+EDIT_KINDS = ("cut", "mute")
+
+
+def merge_spans(spans, lo: int = 0, hi: int | None = None) -> list[tuple[int, int]]:
+    """``spans`` clipped to [lo, hi), sorted, overlapping ones joined."""
+    out: list[list[int]] = []
+    for a, b in sorted((int(a), int(b)) for a, b in spans):
+        a, b = max(a, lo), b if hi is None else min(b, hi)
+        if b <= a:
+            continue
+        if out and a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [(a, b) for a, b in out]
+
+
+def add_edit(edits: list, a: int, b: int, kind: str) -> list:
+    """``edits`` with region [a, b) of ``kind`` added; touching regions of the same kind merge."""
+    same = [(x, y) for x, y, k in edits if k == kind] + [(a, b)]
+    other = [e for e in edits if e[2] != kind]
+    return sorted(other + [(x, y, kind) for x, y in merge_spans(same)])
+
+
+def _silence(x: np.ndarray, a: int, b: int, sr: int):
+    """Silence [a, b) of ``x`` in place with short fades, so it never clicks."""
+    a, b = max(0, a), min(x.shape[0], b)
+    if b <= a:
+        return
+    n = min(int(FADE_S * sr), (b - a) // 2)
+    gain = np.zeros(b - a, np.float32)
+    if n > 1:
+        ramp = (0.5 + 0.5 * np.cos(np.linspace(0, np.pi, n))).astype(np.float32)
+        gain[:n], gain[-n:] = ramp, ramp[::-1]
+    x[a:b] *= gain[:, None] if x.ndim == 2 else gain
 
 
 def detect_sound_bounds(samples: np.ndarray, sr: int) -> tuple[int, int]:
@@ -120,11 +172,59 @@ def retrim(take: Take, handle_ms: float, pauses: PauseSettings | None = None) ->
     return take
 
 
+EDITS_FILE = "compile_edits.json"  # in the session folder: the user's edits per take
+
+
+def load_edits(folder: Path | None) -> dict[str, list]:
+    """Saved edits by take key: ``[[start s, end s, kind], ...]``. Damaged files read as empty."""
+    if folder is None:
+        return {}
+    try:
+        data = json.loads((Path(folder) / EDITS_FILE).read_text(encoding="utf-8"))
+        return {str(k): [[float(a), float(b), str(c)] for a, b, c in v if c in EDIT_KINDS]
+                for k, v in data.items()}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def save_edits(folder: Path | None, edits: dict[str, list]):
+    if folder is None:
+        return
+    path = Path(folder) / EDITS_FILE
+    data = {k: v for k, v in edits.items() if v}
+    try:
+        if data or path.exists():
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+            tmp.replace(path)
+    except OSError:
+        pass  # read-only session folder: the edits last until the app closes
+
+
+def edits_to_seconds(take: Take) -> list:
+    sr = take.sample_rate
+    return [[round(a / sr, 4), round(b / sr, 4), k] for a, b, k in take.edits]
+
+
+def edits_from_seconds(take: Take, saved: list) -> list:
+    sr, n = take.sample_rate, take.samples.shape[0]
+    out = []
+    for a, b, k in saved or []:
+        a, b = max(0, int(round(a * sr))), min(n, int(round(b * sr)))
+        if b > a and k in EDIT_KINDS:
+            out.append((a, b, k))
+    return sorted(out)
+
+
 def render_take(take: Take) -> np.ndarray:
     """The take as it appears in the compilation (before rate/channel conversion)."""
     x = take.samples[take.start:take.end].copy()
-    if take.cuts:
-        x = apply_cuts(x, [(a - take.start, b - take.start) for a, b in take.cuts], take.sample_rate)
+    for a, b, kind in take.edits:
+        if kind == "mute":
+            _silence(x, a - take.start, b - take.start, take.sample_rate)
+    cuts = take.removals()
+    if cuts:
+        x = apply_cuts(x, [(a - take.start, b - take.start) for a, b in cuts], take.sample_rate)
     return x
 
 

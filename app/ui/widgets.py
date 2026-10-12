@@ -169,39 +169,68 @@ class DropZone(QFrame):
         steps_w.setLayout(steps)
         lay.addSpacing(10)
         lay.addWidget(steps_w, alignment=Qt.AlignCenter)
-        # recent recordings: one click to continue where you left off
-        self.recent_box = QWidget()
-        rl = QVBoxLayout(self.recent_box)
-        rl.setContentsMargins(0, 14, 0, 0)
+        # recent recordings: one click to continue where you left off. Two columns: recent
+        # files from anywhere, and the newest recordings of the current session
+        cols = QHBoxLayout()
+        cols.setContentsMargins(0, 14, 0, 0)
+        cols.setSpacing(48)
+        self.recent_box, self.recent_list = self._recent_column("RECENT")
+        self.session_box, self.session_list = self._recent_column("THIS SESSION")
+        cols.addWidget(self.recent_box, alignment=Qt.AlignTop)
+        cols.addWidget(self.session_box, alignment=Qt.AlignTop)
+        cols_w = QWidget()
+        cols_w.setLayout(cols)
+        lay.addWidget(cols_w, alignment=Qt.AlignCenter)
+
+    @staticmethod
+    def _recent_column(title: str):
+        box = QWidget()
+        rl = QVBoxLayout(box)
+        rl.setContentsMargins(0, 0, 0, 0)
         rl.setSpacing(2)
-        head = label("RECENT", "section")
+        head = label(title, "section")
         head.setAlignment(Qt.AlignCenter)
         rl.addWidget(head)
-        self.recent_list = QVBoxLayout()
-        self.recent_list.setSpacing(0)
-        rl.addLayout(self.recent_list)
-        self.recent_box.setVisible(False)
-        lay.addWidget(self.recent_box, alignment=Qt.AlignCenter)
+        items = QVBoxLayout()
+        items.setSpacing(0)
+        rl.addLayout(items)
+        box.setVisible(False)
+        return box, items
 
-    def set_recent(self, paths: list[str], limit: int = 5):
-        from pathlib import Path
-
+    def _fill(self, box: QWidget, items: QVBoxLayout, entries: list[tuple[str, str]]):
+        """``entries``: (path, text shown)."""
         from PySide6.QtWidgets import QToolButton
 
-        while self.recent_list.count():
-            w = self.recent_list.takeAt(0).widget()
+        while items.count():
+            w = items.takeAt(0).widget()
             if w is not None:
                 w.deleteLater()
-        shown = [p for p in paths if Path(p).exists()][:limit]
-        for p in shown:
+        for p, text in entries:
             b = QToolButton()
-            b.setText(Path(p).name)
+            b.setText(text)
             b.setToolTip(p)
             b.setProperty("role", "link")
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _=False, x=p: self.recentClicked.emit(x))
-            self.recent_list.addWidget(b, alignment=Qt.AlignCenter)
-        self.recent_box.setVisible(bool(shown))
+            items.addWidget(b, alignment=Qt.AlignCenter)
+        box.setVisible(bool(entries))
+
+    def set_recent(self, paths: list[str], limit: int = 5):
+        from pathlib import Path
+
+        shown = [p for p in paths if Path(p).exists()][:limit]
+        self._fill(self.recent_box, self.recent_list, [(p, Path(p).name) for p in shown])
+
+    def set_session_recordings(self, paths: list, session_name: str = "", limit: int = 5):
+        """The session's newest recordings, shown without the session name they start with."""
+        from pathlib import Path
+
+        prefix = f"{session_name} - " if session_name else ""
+        entries = []
+        for p in paths[:limit]:
+            name = Path(p).name
+            entries.append((str(p), name[len(prefix):] if prefix and name.startswith(prefix) else name))
+        self._fill(self.session_box, self.session_list, entries)
 
     def set_hover(self, on: bool):
         self.hover = on

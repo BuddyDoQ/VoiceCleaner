@@ -32,6 +32,8 @@ EXPORTS = "Exports"
 _INVALID = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 _REC = re.compile(r" - Rec (\d{3,})")
+_ENHANCED = re.compile(r"^(.*) enhanced(?: \(\d+\))?$")
+PREVIOUS = "Previous Versions"  # inside Exports: the version before the last re-enhance
 
 
 class SessionError(Exception):
@@ -136,6 +138,48 @@ class Session:
     def audio_files(self) -> list[Path]:
         files = list(self.path.glob(f"{RECORDINGS}/*.wav")) + list(self.path.glob(f"{EXPORTS}/*.wav"))
         return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def original_recording(path: Path) -> Path | None:
+    """The recording an enhanced take was made from, or None when it cannot be found.
+
+    ``<Session>/Exports/<Session> - <name> enhanced.wav`` comes from
+    ``<Session>/Recordings/<Session> - <name>.wav`` (long names are shortened in export
+    names, so a single recording starting with the shortened name also counts). A file in
+    Recordings is its own original."""
+    path = Path(path)
+    if path.parent.name == RECORDINGS:
+        return path if path.exists() else None
+    m = _ENHANCED.match(path.stem)
+    if path.parent.name != EXPORTS or not m:
+        return None
+    recordings = path.parent.parent / RECORDINGS
+    exact = recordings / f"{m.group(1)}.wav"
+    if exact.exists():
+        return exact
+    hits = [p for p in recordings.glob("*.wav") if p.stem.startswith(m.group(1))] if recordings.is_dir() else []
+    return hits[0] if len(hits) == 1 else None
+
+
+def previous_version(path: Path) -> Path:
+    """Where the version of ``path`` before its last re-enhance is kept."""
+    path = Path(path)
+    return path.parent / PREVIOUS / path.name
+
+
+def replace_keeping_previous(target: Path, write) -> None:
+    """``write(path)`` writes a new version of ``target``. It replaces ``target`` only once
+    it is complete; the version it replaces is kept as :func:`previous_version`."""
+    target = Path(target)
+    if not target.exists():
+        write(target)
+        return
+    prev = previous_version(target)
+    prev.parent.mkdir(parents=True, exist_ok=True)
+    tmp = prev.with_name(prev.stem + ".new.wav")
+    write(tmp)
+    os.replace(target, prev)
+    os.replace(tmp, target)
 
 
 def create(name: str, root: Path | None = None) -> Session:

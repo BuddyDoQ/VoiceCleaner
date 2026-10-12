@@ -450,6 +450,12 @@ class SettingsPanel(QWidget):
         self._adv(b, "comp_ratio", "Ratio", 1.0, 8.0, 0.1, lambda v: f"{v:.1f}:1")
         self._adv(b, "comp_attack_ms", "Attack", 1, 100, 1, lambda v: f"{v:.0f} ms")
         self._adv(b, "comp_release_ms", "Release", 20, 1000, 5, lambda v: f"{v:.0f} ms")
+        t = QLabel("DE-ESSER")
+        t.setProperty("role", "section")
+        b.addWidget(t)
+        self._adv(b, "deesser", "De-esser", 0, 1, 0.01, lambda v: "Off" if v < 0.005 else pct(v),
+                  "Softens harsh \"s\", \"sh\" and \"t\" sounds only when they stick out, "
+                  "so the voice stays bright without sounding sharp or tinny.")
         lay.addWidget(sec)
 
     def _pause_toggled(self, on: bool):

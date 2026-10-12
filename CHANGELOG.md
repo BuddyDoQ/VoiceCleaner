@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.1.1
+
+- **A warmer, smoother default sound.** The automatic voice EQ no longer thins the low end
+  of every recording or brightens the upper mids by itself; it only corrects what is
+  clearly off. A new **De-esser** (Dynamics, 50% by default) softens harsh "s", "sh" and
+  "t" sounds only where they stick out. Measured against clean speech, the excess in the
+  2-6 kHz range dropped from +1.7 dB to +0.3 dB, with unchanged intelligibility.
+- **Take editor in Compile** (`E`, *✂ Edit Take…*, or right-click a take): drag across a
+  pop, click, stumble or a pause the trimming missed, then **Cut** it out (`X` / `Delete`)
+  or **Silence** it in place (`S`). Zoom in to a few milliseconds (`Ctrl`+wheel, `Z`),
+  hear the selection or the edited result, undo. Edits are saved with the session, kept
+  when a teleprompter take is enhanced, and never change the original file.
+- **Re-enhance takes in Compile** (*↻ Re-enhance*, or right-click; one take or many): from
+  the original recording, with the current settings or any preset, in the background. The
+  version it replaces is kept (*Revert to Previous Version*), and take edits stay in place.
+  **Open in Enhance Tab** fine-tunes a take with A/B and live preview; *Update Take in
+  Compile* then puts the result back.
+- **Teleprompter, always at hand:** a *TELEPROMPTER* button in the header (it shows when
+  the prompter is open, and REC while it records) and next to *Record* on the Original
+  track.
+- **Sessions:** a new session starts clean, on the Enhance tab: the previous session's
+  recording and Compile takes are closed. If the open recording was enhanced but not
+  exported, VoiceCleaner offers to export it first. The start screen lists the session's
+  newest recordings under **THIS SESSION**.
+
 ## 1.1.0
 
 - **Teleprompter** (`Ctrl+T`, or *Teleprompter* on the start screen and in Compile): a pop-out

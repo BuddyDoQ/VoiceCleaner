@@ -13,7 +13,7 @@ from pathlib import Path
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QPainter, QPen
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QListWidget,
-                               QListWidgetItem, QPushButton, QSpinBox, QStyle, QStyledItemDelegate, QVBoxLayout,
+                               QListWidgetItem, QMenu, QPushButton, QSpinBox, QStyle, QStyledItemDelegate, QVBoxLayout,
                                QWidget)
 
 from ..audio.compile import DEFAULT_HANDLE_MS, Take, assemble, load_take, retrim
@@ -29,6 +29,8 @@ from .widgets import card, label
 
 log = get_logger("compile")
 PATH_ROLE = Qt.UserRole
+TITLE_ROLE = Qt.UserRole + 1  # teleprompter rows: "03 · Section · Take 2 of 3" instead of the file name
+UNIT_ROLE = Qt.UserRole + 2  # teleprompter rows: the script unit id
 ROW_HEIGHT = 64
 WAV = (".wav", ".wave")
 
@@ -76,7 +78,7 @@ class TakeDelegate(QStyledItemDelegate):
         f.setBold(True)
         p.setFont(f)
         p.setPen(theme.qcolor(theme.TEXT))
-        name = Path(path).name
+        name = index.data(TITLE_ROLE) or Path(path).name
         p.drawText(QRectF(x, r.top() + 10, text_w, 20), Qt.AlignLeft | Qt.AlignVCenter,
                    p.fontMetrics().elidedText(name, Qt.ElideMiddle, int(text_w)))
         f = QFont(theme.FONT_MONO)
@@ -191,6 +193,7 @@ class TakeList(QListWidget):
 
 class CompilePanel(QWidget):
     exportRequested = Signal(object, str)  # Compilation, suggested name
+    prompterRequested = Signal()
     playStarted = Signal()
 
     def __init__(self, parent=None):
@@ -205,6 +208,11 @@ class CompilePanel(QWidget):
         self._preview_task = None
         self._load_task = None
         self.activity = None  # the window's ActivityTracker, set by MainWindow
+        self.script_mode = False  # the list shows the teleprompter's takes in script order
+        self._script_refresh = QTimer(self)
+        self._script_refresh.setSingleShot(True)
+        self._script_refresh.setInterval(300)
+        self._script_refresh.timeout.connect(self.refresh_script)
         # rebuild the preview automatically once the user pauses: a burst of drags or
         # option changes leads to one build, so Play is instant
         self._rebuild_timer = QTimer(self)
@@ -244,9 +252,36 @@ class CompilePanel(QWidget):
         clear = QPushButton("Clear")
         clear.setProperty("role", "ghost")
         clear.clicked.connect(self.clear)
+        # where the list comes from: the session's exports, or the teleprompter's takes in script order
+        self.src_exports = QPushButton("SESSION EXPORTS")
+        self.src_script = QPushButton("TELEPROMPTER TAKES")
+        for b, side in ((self.src_exports, "left"), (self.src_script, "right")):
+            b.setProperty("role", "ab")
+            b.setProperty("side", side)
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+        self.src_exports.setChecked(True)
+        self.src_script.setToolTip("The teleprompter's takes in script order: the selected take of each section.\n"
+                                   "Right-click a row to use another take.")
+        self.src_exports.clicked.connect(lambda: self.set_script_mode(False))
+        self.src_script.clicked.connect(lambda: self.set_script_mode(True))
+        src = QHBoxLayout()
+        src.setSpacing(0)
+        src.addWidget(self.src_exports)
+        src.addWidget(self.src_script)
+        self.src_switch = QWidget()
+        self.src_switch.setLayout(src)
+        self.src_switch.setVisible(False)  # until the session has teleprompter takes
+        tools.addWidget(self.src_switch)
+        tools.addSpacing(10)
+        self._tool_buttons = (self.add_session_btn, add_files, self.remove_btn, up, down)
         for w in (self.add_session_btn, add_files, self.remove_btn, up, down):
             tools.addWidget(w)
         tools.addStretch(1)
+        prompter = QPushButton("\u25a4 Teleprompter")
+        prompter.setToolTip("Record a script with the teleprompter: its takes appear here in script order (Ctrl+T)")
+        prompter.clicked.connect(self.prompterRequested)
+        tools.addWidget(prompter)
         tools.addWidget(clear)
         outer.addLayout(tools)
 
@@ -256,6 +291,8 @@ class CompilePanel(QWidget):
         self.list.orderChanged.connect(self._changed)
         self.list.moveRequested.connect(self.move_selected)
         self.list.itemDoubleClicked.connect(lambda it: self.preview_take(it.data(PATH_ROLE)))
+        self.list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._row_menu)
         self.list.setToolTip("Drag to reorder • Double-click to hear a take • Drop WAV files here to add them")
         outer.addWidget(self.list, 1)
         self.empty_hint = label("No takes yet. Enhance and export recordings in this session, or drop WAV files here.",
@@ -373,10 +410,95 @@ class CompilePanel(QWidget):
         self.session = session
 
     def ensure_populated(self):
-        """First time the tab is shown for a session: start with its enhanced exports."""
-        if self.session is not None and self._populated_for != self.session.path and self.list.count() == 0:
+        """First time the tab is shown for a session: its teleprompter takes in script order
+        if it has any, else its enhanced exports."""
+        if self.session is None:
+            return
+        has_script = bool(self._book().takes)
+        self.src_switch.setVisible(has_script)
+        if self._populated_for != self.session.path and (self.list.count() == 0 or self.script_mode):
             self._populated_for = self.session.path
+            if has_script:
+                self.set_script_mode(True)
+            else:
+                self.add_session_exports(quiet=True)
+
+    # --- teleprompter takes ------------------------------------------------------------------
+    def _book(self):
+        from ..teleprompter.takes import TakeBook
+
+        return TakeBook.shared(self.session.path)
+
+    def set_script_mode(self, on: bool):
+        self.script_mode = on
+        self.src_exports.setChecked(not on)
+        self.src_script.setChecked(on)
+        for b in self._tool_buttons:
+            b.setEnabled(not on)
+        self.list.setDragDropMode(QAbstractItemView.NoDragDrop if on else QAbstractItemView.InternalMove)
+        self.list.clear()
+        if on:
+            self.refresh_script()
+        else:
             self.add_session_exports(quiet=True)
+
+    def takes_changed(self):
+        """The teleprompter recorded or enhanced a take: update the list soon."""
+        if self.session is None:
+            return
+        self.src_switch.setVisible(True)
+        if self.script_mode or (self.list.count() == 0 and self.isVisible()):
+            if not self.script_mode:
+                self.set_script_mode(True)
+            self._script_refresh.start()
+
+    def refresh_script(self):
+        if self.session is None or not self.script_mode:
+            return
+        book = self._book()
+        rows = book.compilation(self.session.recordings_dir, self.session.exports_dir)
+        wanted = [str(p) for _u, _t, p in rows]
+        if wanted == self.paths():
+            for i, (u, t, p) in enumerate(rows):  # same files: only the labels may change
+                self.list.item(i).setData(TITLE_ROLE, self._title(book, u, t, p))
+            self.list.viewport().update()
+            return
+        self.list.clear()
+        for u, t, p in rows:
+            it = QListWidgetItem()
+            it.setData(PATH_ROLE, str(p))
+            it.setData(TITLE_ROLE, self._title(book, u, t, p))
+            it.setData(UNIT_ROLE, u["id"])
+            it.setToolTip(f"{p}\nRight-click to use another take.")
+            self.list.addItem(it)
+        self._load_paths([w for w in wanted if w not in self.takes])
+        self._changed()
+
+    def _title(self, book, unit: dict, take, path: Path) -> str:
+        n = len(book.takes_of(unit["id"]))
+        star = " \u2605" if take.keeper else ""
+        state = "" if take.enhanced and path.parent == self.session.exports_dir else " \u00b7 enhancing\u2026"
+        return f"{unit['id']} \u00b7 {unit.get('title', '')} \u00b7 Take {take.number} of {n}{star}{state}"
+
+    def _row_menu(self, pos):
+        it = self.list.itemAt(pos)
+        if it is None or not self.script_mode or self.session is None:
+            return
+        unit = it.data(UNIT_ROLE)
+        book = self._book()
+        current = book.selected(unit)
+        m = QMenu(self)
+        for t in sorted(book.takes_of(unit), key=lambda t: t.number):
+            star = "  \u2605" if t.keeper else ""
+            used = "  \u2190 used" if current and t.number == current.number else ""
+            a = m.addAction(f"Take {t.number}  ({t.duration:.1f} s){star}{used}")
+            a.triggered.connect(lambda _=False, n=t.number: self._use_take(unit, n))
+        m.exec(self.list.viewport().mapToGlobal(pos))
+
+    def _use_take(self, unit: str, number: int):
+        book = self._book()
+        book.select(unit, number)
+        self.refresh_script()
 
     def add_session_exports(self, quiet: bool = False):
         if self.session is None:
@@ -405,6 +527,12 @@ class CompilePanel(QWidget):
             it.setToolTip(p)
             it.setFlags(it.flags() | Qt.ItemIsDragEnabled)
             self.list.addItem(it)
+        self._load_paths(new)
+
+    def _load_paths(self, new: list):
+        """Read and trim the takes of ``new`` (paths already in the list) in the background."""
+        if not new:
+            return
         handle = self.handle.value()
         pauses = self.pause_settings()
 

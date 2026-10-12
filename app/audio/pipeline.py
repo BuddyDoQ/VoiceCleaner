@@ -15,6 +15,7 @@ buffers are disk-backed when the recording would not fit in memory.
 """
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field, replace
 
@@ -144,6 +145,20 @@ def slice_analysis(analysis: AnalysisResult, a: int, b: int, sr: int) -> Analysi
                    silence_regions=[(x, y) for x, y in regions if y - x > 0.05])
 
 
+# One enhancement at a time: the AI models are not shared between threads safely, and
+# two jobs on one GPU would only slow each other down (Enhance, live preview, and the
+# teleprompter's background enhancing of takes all go through here).
+PIPELINE_LOCK = threading.RLock()
+
+
+def _serialized(fn):
+    def wrapper(*args, **kwargs):
+        with PIPELINE_LOCK:
+            return fn(*args, **kwargs)
+    wrapper.__name__, wrapper.__doc__ = fn.__name__, fn.__doc__
+    return wrapper
+
+
 class EnhancementPipeline:
     def __init__(self, model_manager=None, chunk_seconds: float = 20.0, overlap_seconds: float = 1.0):
         self.model_manager = model_manager
@@ -151,6 +166,7 @@ class EnhancementPipeline:
         self.overlap_seconds = overlap_seconds
 
     # ------------------------------------------------------------------------------
+    @_serialized
     def run(self, audio: AudioData, analysis: AnalysisResult, settings: ProcessingSettings,
             ctx=None, learned_profile: NoiseProfile | None = None) -> PipelineResult:
         t0 = time.perf_counter()
@@ -232,6 +248,7 @@ class EnhancementPipeline:
         return result
 
     # --- live preview --------------------------------------------------------------
+    @_serialized
     def preview(self, audio: AudioData, analysis: AnalysisResult, settings: ProcessingSettings,
                 start_s: float, end_s: float, ctx=None, learned_profile: NoiseProfile | None = None,
                 context_s: float = PREVIEW_CONTEXT_S) -> "PreviewResult":

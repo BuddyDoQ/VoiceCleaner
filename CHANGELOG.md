@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.1.0
+
+- **Teleprompter** (`Ctrl+T`, or *Teleprompter* on the start screen and in Compile): a pop-out
+  prompter that records while you read.
+  - Every script section (`## Heading | Clip name`) becomes its own take, named after the
+    clip: a new take starts by itself when the next section comes up. Cuts are placed in the
+    pause between sections, so nothing is cut off or repeated.
+  - **Retake** (`Backspace` / `PageUp`) records the section again; all takes are kept and the
+    newest is used, unless one is marked **Keep** (`G`). **Last take** (`P`) plays it back.
+  - Takes are **enhanced automatically** in the background and appear in **Compile in script
+    order** (*TELEPROMPTER TAKES*), with a take picker per section (right-click).
+  - *Step* mode (wait on each section or line), *Lines* mode (one take per paragraph),
+    presentation clicker and foot pedal keys (PageUp / PageDown), REC indicator with level
+    meter, open or edit the script in the prompter, mirror, stage directions, countdown,
+    adjustable speed and size, fullscreen. Pausing the prompter pauses the take.
+
 ## 1.0.9
 
 - **Install updates from inside VoiceCleaner (Windows).** When an update is available,

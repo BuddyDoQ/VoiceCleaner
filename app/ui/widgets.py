@@ -111,6 +111,7 @@ class DropZone(QFrame):
 
     chooseClicked = Signal()
     recordClicked = Signal()
+    prompterClicked = Signal()
     recentClicked = Signal(str)
 
     def __init__(self, parent=None):
@@ -149,6 +150,11 @@ class DropZone(QFrame):
         buttons.addStretch(1)
         buttons.addWidget(btn)
         buttons.addWidget(rec)
+        prompter = QPushButton("\u25a4  Teleprompter")
+        prompter.setCursor(Qt.PointingHandCursor)
+        prompter.setToolTip("Read a script from a teleprompter while it records: one take per section")
+        prompter.clicked.connect(self.prompterClicked)
+        buttons.addWidget(prompter)
         buttons.addStretch(1)
         lay.addLayout(buttons)
         hint = label("Mono or stereo • 16/24-bit or 32-bit float • 44.1, 48, 96 kHz and more • "

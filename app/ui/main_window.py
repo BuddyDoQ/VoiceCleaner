@@ -66,6 +66,7 @@ SHORTCUTS = [
     ("R", "Record / stop recording"),
     ("L", "Loop the selection (or the whole recording)"),
     ("Ctrl+Shift+N", "New session"),
+    ("Ctrl+T", "Teleprompter (its own keys: press H in it)"),
     ("Ctrl+Z / " + REDO_KEYS, "Undo / redo a settings change"),
     ("Esc", "Cancel"),
     ("Ctrl+/", "This list"),
@@ -95,7 +96,14 @@ class MainWindow(QMainWindow):
         self._preview_task = None
         self._preview_gen = 0
         self._export_after_enhance = False
-        self._pending_update = None  # (plan, installer, version, relaunch): installed when the app closes
+        self._pending_update = None
+        self.prompter = None  # the teleprompter window, while open
+        from ..teleprompter.enhancer import TakeEnhancer
+
+        self.take_enhancer = TakeEnhancer(self._get_model_manager, self)
+        self.take_enhancer.enhanced.connect(self._take_enhanced)
+        self.take_enhancer.failed.connect(lambda name, msg: log.warning("Take %s not enhanced: %s", name, msg))
+        self.take_enhancer.pendingChanged.connect(self._takes_pending)  # (plan, installer, version, relaunch): installed when the app closes
         self._pending_warnings: list[str] = []
         self._last_notes: list[str] = []
 
@@ -134,6 +142,7 @@ class MainWindow(QMainWindow):
         if isinstance(self.config.extra.get("compile"), dict):
             self.compile_panel.restore_options(self.config.extra["compile"])
         self.compile_panel.exportRequested.connect(self._export_compilation)
+        self.compile_panel.prompterRequested.connect(self.open_teleprompter)
         self.compile_panel.playStarted.connect(self._compile_play_started)
         self.playback.addToCompile.connect(self._add_to_compile)
         self.tabs.addTab(self.compile_panel, "COMPILE")
@@ -181,6 +190,7 @@ class MainWindow(QMainWindow):
         self.update_checker.failed.connect(self._update_failed)
         QTimer.singleShot(4000, self._auto_check_updates)  # after startup has settled
         QTimer.singleShot(1500, self._report_update_result)
+        QTimer.singleShot(3000, self._resume_take_enhancing)  # takes left unenhanced last time
 
     # ================================================================================== UI
     def _build_header(self) -> QWidget:
@@ -276,6 +286,8 @@ class MainWindow(QMainWindow):
             appearance.addAction(a)
             self.theme_actions[key] = a
         m.addSeparator()
+        m.addAction("Teleprompter\u2026", self.open_teleprompter, QKeySequence("Ctrl+T"))
+        m.addSeparator()
         m.addAction("Keyboard Shortcuts", self._show_shortcuts, QKeySequence("Ctrl+/"))
         m.addAction("Show Tips Again", self._show_tips)
         m.addAction("Open Log Folder", lambda: self._open_folder(log_dir()))
@@ -294,6 +306,7 @@ class MainWindow(QMainWindow):
         self.drop_zone = DropZone()
         self.drop_zone.chooseClicked.connect(self.choose_file)
         self.drop_zone.recordClicked.connect(self.start_new_recording)
+        self.drop_zone.prompterClicked.connect(self.open_teleprompter)
         self.drop_zone.recentClicked.connect(lambda p: self._open_recent(Path(p)))
         self.drop_zone.set_recent([p for p in self.config.extra.get("recent_files", []) if isinstance(p, str)])
         dz_wrap = QWidget()
@@ -1075,6 +1088,73 @@ class MainWindow(QMainWindow):
             self.wave_orig.set_selection(None)
             self._selection_changed(None)
 
+    # ============================================================================ teleprompter
+    def open_teleprompter(self):
+        if self.prompter is not None:
+            self.prompter.showNormal() if self.prompter.isMinimized() else None
+            self.prompter.raise_()
+            self.prompter.activateWindow()
+            return
+        from ..teleprompter.window import TeleprompterWindow
+
+        prefs = self.config.extra.setdefault("teleprompter", {})
+        rp = self.record_panel
+        mic = rp.mic_row.source if hasattr(rp, "mic_row") else None
+        gain = rp.mic_row.gain if hasattr(rp, "mic_row") else 1.0
+        self.player.pause() if self.player.state == "playing" else None
+        self.prompter = TeleprompterWindow(self.session, prefs, mic, gain)
+        self.prompter.setWindowIcon(self.windowIcon())
+        self.prompter.takeSaved.connect(self._prompter_take)
+        self.prompter.scriptChanged.connect(self.compile_panel.takes_changed)
+        self.prompter.recordingChanged.connect(self._prompter_recording)
+        self.prompter.destroyed.connect(lambda *_: setattr(self, "prompter", None))
+        self.prompter.setAttribute(Qt.WA_DeleteOnClose)
+        self.prompter.show()
+        self.prompter.raise_()
+        self.prompter.activateWindow()
+
+    def _prompter_recording(self, on: bool):
+        if on:
+            self.activity.start("prompter", "Teleprompter recording", None, fraction=None)
+        else:
+            self.activity.finish("prompter")
+
+    def _prompter_take(self, info, path: Path):
+        """A take was saved: enhance it in the background; Compile and Playback show it."""
+        from ..teleprompter.takes import TakeBook
+
+        book = TakeBook.shared(self.session.path)
+        out = self.session.export_path(path)
+        self.take_enhancer.enqueue(path, out, self.settings_panel.current(), self.settings_panel.smart.isChecked(),
+                                   book)
+        self.compile_panel.takes_changed()
+        self.playback.refresh()
+
+    def _take_enhanced(self, _take: str, _path: str):
+        self.compile_panel.takes_changed()
+        self.playback.refresh()
+
+    def _takes_pending(self, n: int):
+        if n > 0:
+            if self.activity.job("takes") is None:
+                self.activity.start("takes", "Enhancing takes", self.compile_panel, fraction=None)
+            self.activity.update("takes", None, f"{n} take{'s' if n != 1 else ''} to go", badge=f"{n} to enhance")
+        else:
+            self.activity.finish("takes")
+
+    def _resume_take_enhancing(self):
+        """Takes recorded before the app was closed, not enhanced yet: enhance them now."""
+        from ..teleprompter.takes import TakeBook
+
+        book = TakeBook.shared(self.session.path)
+        todo = [t for t in book.takes if not t.enhanced and (self.session.recordings_dir / t.file).exists()]
+        for t in todo:
+            path = self.session.recordings_dir / t.file
+            self.take_enhancer.enqueue(path, self.session.export_path(path), self.settings_panel.current(),
+                                       self.settings_panel.smart.isChecked(), book)
+        if todo:
+            log.info("Enhancing %d teleprompter take(s) left from last time", len(todo))
+
     # ============================================================================ undo
     def _undo_shortcut(self):
         if self.tabs.currentWidget() in (self.tabs.widget(0), self.batch_page):  # where the settings are
@@ -1664,6 +1744,8 @@ class MainWindow(QMainWindow):
         self._update_title()
 
     def _switch_session(self, session):
+        if self.prompter is not None:
+            self.prompter.close()  # its takes belong to the previous session
         self.session = session
         self.config.extra["session_path"] = str(session.path)
         self._update_session_ui()
@@ -1673,6 +1755,7 @@ class MainWindow(QMainWindow):
             self.compile_panel.ensure_populated()
         self.status_label.setText(f"Session \u201c{session.name}\u201d. New recordings and exports go to its folder.")
         log.info("Session: %s (%s)", session.name, session.path)
+        self._resume_take_enhancing()
 
     def new_session(self):
         if self.record_panel.recording:
@@ -1889,6 +1972,12 @@ class MainWindow(QMainWindow):
 
     def _work_in_progress(self) -> str:
         """What would be lost by quitting now, or ""."""
+        if self.prompter is not None and self.prompter.recording:
+            return "The teleprompter is recording. Quitting stops it; the takes so far are kept."
+        if self.take_enhancer.pending:
+            n = self.take_enhancer.pending
+            return (f"{n} teleprompter take{'s are' if n != 1 else ' is'} still being enhanced. Quitting stops "
+                    "that; the recordings are kept and are enhanced the next time you open this session.")
         if self.record_panel.recording:
             return "A recording is in progress. Quitting stops it; what was captured so far is kept."
         if self._batch:
@@ -1927,6 +2016,9 @@ class MainWindow(QMainWindow):
         if self._batch:
             self._batch[1].cancel()
             self._batch[0].wait(3000)
+        if self.prompter is not None:
+            self.prompter.close()
+        self.take_enhancer.shutdown()
         self.record_panel.shutdown()
         self.player.shutdown()
         self.playback.shutdown()

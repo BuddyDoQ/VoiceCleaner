@@ -202,6 +202,27 @@ The guiding rule is *better speech, not obviously processed speech*.
   streamed to disk while recording, so an unplugged USB microphone or a crash keeps
   what was captured. Combined results are written as new files; the original is never
   changed.
+* **Teleprompter** (`Ctrl+T`, or *Teleprompter* on the start screen and in Compile): a
+  pop-out prompter that records while you read, one take per script section.
+  * Script format: `## Heading | Clip name` starts a section (the clip name names its
+    takes), `[brackets]` are stage directions, a blank line starts a paragraph. Paste or
+    edit it in the prompter (*Edit*, `E`) or open a .txt / .md file.
+  * *Start* (`Space`) counts down 3-2-1 and records from the chosen microphone without a
+    break. When the next section reaches the reading line (or you press `→` / `PageDown`),
+    a new take starts by itself. The cut is placed in the pause between the sections, so
+    a word that runs over is never cut or repeated.
+  * **Retake** (`Backspace` or `PageUp`) goes back to the start of the section and records
+    it again. Every take is kept; the newest is used, unless you marked one with
+    **Keep** (`G`). **Last take** (`P`) plays back the most recent take.
+  * *Step* mode holds each section (or line) until you move on; *Lines* records one take
+    per paragraph instead of per section, for line-by-line voice work. Presentation
+    clickers and foot pedals that send PageUp/PageDown work hands-free.
+  * Pausing (`Space`) pauses the take too. Speed (wpm, `↑`/`↓`), text size (`+`/`-`),
+    mirror for teleprompter glass (`M`), stage directions (`D`), fullscreen (`F`), and a
+    REC indicator with take number, level meter and recorded time.
+  * Takes are saved in the session's Recordings folder as
+    `<Session> - 03 What It Does - Take 2.wav`, enhanced in the background with the
+    current settings (into Exports), and listed in Compile.
 * **Sessions:** a session is a project. *New Session* (header button, or `Ctrl+Shift+N`)
   creates `Documents\VoiceCleaner Sessions\<name>\` with `Recordings` and `Exports`
   folders. Every file it creates carries the session name, for example
@@ -228,6 +249,9 @@ The guiding rule is *better speech, not obviously processed speech*.
   * The preview updates by itself a moment after each change, so *Play* starts at once.
     Changing the order while it plays keeps playing and continues at the same take.
   * Export it to the session's Exports folder as `<Session> - Compilation.wav`.
+  * **Teleprompter takes:** with *TELEPROMPTER TAKES* the list is the script, in order: one
+    row per section with its selected take (enhanced when ready). Right-click a row to use
+    another take; it then counts as that section's keeper.
 * **Shorten long pauses (optional, off by default):** pauses inside a recording that are
   longer than a threshold (1.0 s by default, adjustable from 0.3 to 5 s) are shortened to a natural pause (250 ms by
   default, adjustable up to 2 s). Both values are remembered between sessions. The kept pause is made of the start and end of the original silence, so

@@ -129,7 +129,8 @@ NOTES = """## macOS ({arch})
 * **VoiceCleaner-{v}-macos-{arch}.dmg**: open it and drag VoiceCleaner to Applications.
 * **VoiceCleaner-{v}-macos-{arch}.zip**: the same app, zipped.
 
-Requires macOS 12 or newer on {chip}. Processing runs on the CPU. The 490 MB voice
+Requires macOS 12 or newer on {chip}. Noise reduction runs on the CPU and Voice Re-synthesis on the
+Apple GPU (Apple Silicon). The 490 MB voice
 re-synthesis model downloads the first time that feature is used; everything else works offline.
 
 {gatekeeper}

@@ -219,7 +219,10 @@ The guiding rule is *better speech, not obviously processed speech*.
     clickers and foot pedals that send PageUp/PageDown work hands-free.
   * Pausing (`Space`) pauses the take too. Speed (wpm, `↑`/`↓`), text size (`+`/`-`),
     mirror for teleprompter glass (`M`), stage directions (`D`), fullscreen (`F`), and a
-    REC indicator with take number, level meter and recorded time.
+    REC indicator with take number, level meter and recorded time. If the microphone sends
+    only silence, a NO SOUND warning names it.
+  * Colours follow the app's day/night setting; the ◐ button keeps the prompter always
+    Dark or Light instead.
   * Takes are saved in the session's Recordings folder as
     `<Session> - 03 What It Does - Take 2.wav`, enhanced in the background with the
     current settings (into Exports), and listed in Compile.

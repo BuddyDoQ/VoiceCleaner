@@ -1803,6 +1803,8 @@ class MainWindow(QMainWindow):
         if pref in self.theme_actions:
             self.theme_actions[pref].setChecked(True)
         self._update_theme_button()
+        if getattr(self, "prompter", None) is not None:
+            self.prompter.apply_theme()  # it follows the app unless set to Dark or Light
         log.info("Theme: %s (%s)", pref, mode)
 
     def _toggle_theme(self):

@@ -15,6 +15,8 @@
     presentation clicker and foot pedal keys (PageUp / PageDown), REC indicator with level
     meter, open or edit the script in the prompter, mirror, stage directions, countdown,
     adjustable speed and size, fullscreen. Pausing the prompter pauses the take.
+  - Uses the app's colours and follows its day/night setting (the ◐ button can keep it
+    always Dark or Light). Warns when the microphone sends only silence.
 
 ## 1.0.9
 

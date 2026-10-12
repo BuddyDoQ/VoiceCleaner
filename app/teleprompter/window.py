@@ -30,36 +30,59 @@ from .takes import TakeBook, TakeInfo, TakeRecorder
 
 log = get_logger("teleprompter")
 
-# the prompter keeps the dark, high-contrast look of the HTML version in both app themes
-BG = "#0b0b0c"
-TEXT = "#f4f1ea"
-MUTED = "#8a877f"
-CUE = "#d9a957"
-ACCENT = "#e8643c"
-REC = "#ff4d4f"
-PANEL = "rgba(22, 22, 24, 235)"
+# Colours come from the app's theme (day or night); by default the prompter follows the app.
+C: dict = {}
+
+
+def palette(mode: str) -> dict:
+    """The prompter's colours for "night" or "day", from the app theme's tokens."""
+    from ..ui import theme
+
+    t = theme.NIGHT if mode == "night" else theme.DAY
+    night = mode == "night"
+    return {
+        "mode": mode, "bg": t["BG"], "text": t["TEXT"], "muted": t["MUTED"], "faint": t["FAINT"],
+        "cue": t["WARNING"], "accent": t["ACCENT"], "accent_text": t["ACCENT_TEXT"], "rec": t["RECORD"],
+        "panel": QColor(t["SURFACE"]).name(), "panel_alpha": 235, "button": t["SURFACE_2"], "hover": t["SURFACE_3"],
+        "border": t["BORDER_STRONG"], "inset": t["SURFACE_2"], "track": t["SURFACE_3"],
+        "shade": "rgba(0,0,0,190)" if night else "rgba(20,20,30,110)",
+        "count_bg": "rgba(0,0,0,140)" if night else "rgba(255,255,255,170)",
+    }
+
+
+def _rgba(hex_color: str, alpha: int) -> str:
+    c = QColor(hex_color)
+    return f"rgba({c.red()}, {c.green()}, {c.blue()}, {alpha})"
+
+
 READ_FRAC = 0.40
-STYLE = f"""
-QWidget#prompter {{ background: {BG}; }}
-QFrame#bar, QFrame#help, QFrame#editor_box {{ background: {PANEL}; border: 1px solid rgba(255,255,255,30); border-radius: 12px; }}
-QFrame#bar QLabel, QFrame#help QLabel {{ color: {MUTED}; font-size: 10pt; background: transparent; }}
+
+
+def build_style() -> str:
+    panel = _rgba(C["panel"], C["panel_alpha"])
+    return f"""
+QWidget#prompter {{ background: {C['bg']}; }}
+QFrame#bar, QFrame#help, QFrame#editor_box {{ background: {panel}; border: 1px solid {C['border']}; border-radius: 12px; }}
+QFrame#bar QLabel, QFrame#help QLabel {{ color: {C['muted']}; font-size: 10pt; background: transparent; }}
 QFrame#bar QPushButton, QFrame#editor_box QPushButton, QFrame#bar QComboBox {{
-    background: #2a2a2e; color: {TEXT}; border: 1px solid rgba(255,255,255,30); border-radius: 7px;
+    background: {C['button']}; color: {C['text']}; border: 1px solid {C['border']}; border-radius: 7px;
     padding: 5px 10px; font-size: 10pt; }}
-QFrame#bar QPushButton:hover, QFrame#editor_box QPushButton:hover {{ background: #36363b; }}
-QFrame#bar QPushButton:checked {{ background: {ACCENT}; border-color: {ACCENT}; color: #111; }}
-QFrame#bar QPushButton:disabled {{ color: #5a5a60; }}
+QFrame#bar QPushButton:hover, QFrame#editor_box QPushButton:hover {{ background: {C['hover']}; }}
+QFrame#bar QPushButton:checked {{ background: {C['accent']}; border-color: {C['accent']}; color: {C['accent_text']}; }}
+QFrame#bar QPushButton:disabled {{ color: {C['faint']}; }}
 QPushButton#play {{ font-weight: 700; min-width: 86px; }}
-QPushButton#retake {{ color: {ACCENT}; font-weight: 700; }}
-QLabel#rec {{ color: {REC}; font-weight: 700; font-size: 10.5pt; }}
-QLabel#status {{ color: {TEXT}; background: {PANEL}; border-radius: 10px; padding: 8px 16px; font-size: 12pt; }}
-QLabel#countdown {{ color: {ACCENT}; background: rgba(0,0,0,140); font-weight: 800; }}
-QPlainTextEdit {{ background: #0e0e10; color: {TEXT}; border: 1px solid rgba(255,255,255,30); border-radius: 8px;
+QFrame#bar QPushButton#retake {{ color: {C['accent']}; font-weight: 700; }}
+QFrame#editor_box QPushButton#load {{ background: {C['accent']}; border-color: {C['accent']}; color: {C['accent_text']}; font-weight: 700; }}
+QLabel#rec {{ color: {C['rec']}; font-weight: 700; font-size: 10.5pt; }}
+QLabel#status {{ color: {C['text']}; background: {panel}; border: 1px solid {C['border']}; border-radius: 10px;
+    padding: 8px 16px; font-size: 12pt; }}
+QLabel#countdown {{ color: {C['accent']}; background: {C['count_bg']}; font-weight: 800; }}
+QPlainTextEdit {{ background: {C['inset']}; color: {C['text']}; border: 1px solid {C['border']}; border-radius: 8px;
     font-family: Consolas, monospace; font-size: 11pt; padding: 8px; }}
-QFrame#editor_shade {{ background: rgba(0,0,0,190); }}
-QSlider::groove:horizontal {{ height: 4px; background: #3a3a40; border-radius: 2px; }}
-QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }}
-QSlider::handle:horizontal {{ background: {TEXT}; width: 14px; height: 14px; margin: -5px 0; border-radius: 7px; }}
+QFrame#editor_shade {{ background: {C['shade']}; }}
+QSlider::groove:horizontal {{ height: 4px; background: {C['track']}; border-radius: 2px; }}
+QSlider::sub-page:horizontal {{ background: {C['accent']}; border-radius: 2px; }}
+QSlider::handle:horizontal {{ background: {C['text']}; width: 14px; height: 14px; margin: -5px 0; border-radius: 7px; }}
 QSlider:horizontal {{ min-height: 18px; }}
 """
 
@@ -153,9 +176,9 @@ class Stage(QWidget):
             cf.setForeground(QColor(color))
             return cf
 
-        text_f, cue_f = fmt(TEXT), fmt(CUE, 0.5, italic=True, weight=QFont.Medium)
-        head_f = fmt(MUTED, 0.42, weight=QFont.Bold, spacing=14)
-        clip_f = fmt(ACCENT, 0.36, weight=QFont.Bold, spacing=6)
+        text_f, cue_f = fmt(C["text"]), fmt(C["cue"], 0.5, italic=True, weight=QFont.Medium)
+        head_f = fmt(C["muted"], 0.42, weight=QFont.Bold, spacing=14)
+        clip_f = fmt(C["accent"], 0.36, weight=QFont.Bold, spacing=6)
         para_units = {(u.section, u.paragraph) for u in self.units}
         starts: dict[tuple, int] = {}
         if self.script is not None:
@@ -184,7 +207,7 @@ class Stage(QWidget):
                     if (sec.index, p) in para_units:
                         starts[(sec.index, p)] = n
                     p += 1
-        block(s * 0.8, 0, [("— END —", fmt(MUTED, 0.5, weight=QFont.Medium, spacing=30))])
+        block(s * 0.8, 0, [("— END —", fmt(C["faint"], 0.5, weight=QFont.Medium, spacing=30))])
         bf = cur.blockFormat()
         bf.setAlignment(Qt.AlignHCenter)
         cur.setBlockFormat(bf)
@@ -226,7 +249,7 @@ class Stage(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        p.fillRect(self.rect(), QColor(BG))
+        p.fillRect(self.rect(), QColor(C["bg"]))
         tw = self.text_width()
         read_y = h * READ_FRAC
         p.save()
@@ -237,8 +260,8 @@ class Stage(QWidget):
         self.doc.drawContents(p, QRectF(0, self.pos - read_y, tw, h))
         p.restore()
         # fade towards the edges, so the eye stays on the reading line
-        bg = QColor(BG)
-        clear = QColor(BG)
+        bg = QColor(C["bg"])
+        clear = QColor(C["bg"])
         clear.setAlpha(0)
         top = QLinearGradient(0, 0, 0, read_y - h * 0.18)
         top.setColorAt(0, bg)
@@ -251,11 +274,11 @@ class Stage(QWidget):
         p.fillRect(QRectF(0, y0, w, h - y0), bottom)
         # reading-line markers (red while recording)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(REC if self.recording else ACCENT))
+        p.setBrush(QColor(C["rec"] if self.recording else C["accent"]))
         for x, d in ((14, 1), (w - 14, -1)):
             p.drawPolygon(QPolygonF([QPointF(x, read_y - 14), QPointF(x + 20 * d, read_y), QPointF(x, read_y + 14)]))
         # progress along the top
-        p.setBrush(QColor(ACCENT))
+        p.setBrush(QColor(C["accent"]))
         p.drawRect(QRectF(0, 0, w * min(1.0, self.pos / self.max_pos), 3))
 
 
@@ -269,9 +292,10 @@ class TeleprompterWindow(QWidget):
         super().__init__(parent, Qt.Window)
         self.setObjectName("prompter")
         self.setWindowTitle("VoiceCleaner Teleprompter")
-        self.setStyleSheet(STYLE)
         self.setMinimumSize(640, 420)
         self.prefs = prefs
+        C.update(palette(self._theme_mode()))
+        self.setStyleSheet(build_style())
         self.session = session
         self.book = TakeBook.shared(session.path)
         self.mic, self.gain = mic, gain
@@ -385,6 +409,9 @@ class TeleprompterWindow(QWidget):
         row1.addSpacing(8)
         row1.addWidget(self.mic_combo)
         row2.addStretch(1)
+        self.theme_btn = self._btn(self.THEME_LABELS[self.prefs.get("theme", "auto")], self._cycle_theme,
+                                   "Colours: Auto follows the app's day/night setting; or always Dark or Light")
+        row2.addWidget(self.theme_btn)
         for b, fn, tip in (("⛶", self.toggle_fullscreen, "Fullscreen (F)"), ("Edit", self.open_editor,
                            "Edit the script (E)"), ("?", self.toggle_help, "Keys (H)")):
             row2.addWidget(self._btn(b, fn, tip))
@@ -396,17 +423,8 @@ class TeleprompterWindow(QWidget):
         self.help.setObjectName("help")
         hl = QVBoxLayout(self.help)
         hl.setContentsMargins(14, 10, 14, 10)
-        hl.addWidget(QLabel(
-            "<b style='color:#f4f1ea'>Space</b> start / pause &nbsp; <b style='color:#f4f1ea'>Esc</b> stop<br>"
-            "<b style='color:#f4f1ea'>Backspace</b> or <b style='color:#f4f1ea'>PgUp</b> retake<br>"
-            "<b style='color:#f4f1ea'>→</b> or <b style='color:#f4f1ea'>PgDn</b> next &nbsp; "
-            "<b style='color:#f4f1ea'>←</b> previous<br>"
-            "<b style='color:#f4f1ea'>↑ ↓</b> speed &nbsp; <b style='color:#f4f1ea'>+ −</b> size<br>"
-            "<b style='color:#f4f1ea'>G</b> keep take &nbsp; <b style='color:#f4f1ea'>P</b> play last take<br>"
-            "<b style='color:#f4f1ea'>M</b> mirror &nbsp; <b style='color:#f4f1ea'>D</b> directions &nbsp; "
-            "<b style='color:#f4f1ea'>F</b> fullscreen<br>"
-            "<b style='color:#f4f1ea'>E</b> edit &nbsp; <b style='color:#f4f1ea'>Home</b> top &nbsp; "
-            "<b style='color:#f4f1ea'>H</b> hide this<br>Mouse wheel nudges"))
+        self.help_text = QLabel()
+        hl.addWidget(self.help_text)
         self.help.setVisible(not self.prefs.get("help_hidden", False))
 
         self.status = QLabel("", self)
@@ -430,25 +448,65 @@ class TeleprompterWindow(QWidget):
         box.setObjectName("editor_box")
         bv = QVBoxLayout(box)
         bv.setContentsMargins(16, 14, 16, 14)
-        hint = QLabel("<span style='color:#8a877f'>Paste or edit your script. "
-                      "<span style='color:#d9a957'>## Heading | Clip name</span> starts a section (the clip name "
-                      "names its takes) · <span style='color:#d9a957'>[brackets]</span> are stage directions "
-                      "· a blank line starts a new paragraph.</span>")
-        hint.setWordWrap(True)
-        bv.addWidget(hint)
+        self.editor_hint = QLabel()
+        self.editor_hint.setWordWrap(True)
+        bv.addWidget(self.editor_hint)
         self.editor_text = QPlainTextEdit()
         bv.addWidget(self.editor_text, 1)
         er = QHBoxLayout()
         er.addWidget(self._btn("Open File…", self._open_file, "Load a .txt or .md script"))
         er.addStretch(1)
         er.addWidget(self._btn("Cancel", self.close_editor, "Esc"))
-        load = self._btn("Load Script", self._apply_editor, "")
-        load.setStyleSheet(f"background: {ACCENT}; color: #111; font-weight: 700;")
+        load = self._btn("Load Script", self._apply_editor, "", "load")
         er.addWidget(load)
         bv.addLayout(er)
         ev.addWidget(box)
         self.editor.setVisible(False)
+        self._fill_rich_text()
         self._update_controls()
+
+    def _fill_rich_text(self):
+        """The help card and editor hint, in the current colours."""
+        def k(key):
+            return f"<b style='color:{C['text']}'>{key}</b>"
+
+        self.help_text.setText(
+            f"{k('Space')} start / pause &nbsp; {k('Esc')} stop<br>"
+            f"{k('Backspace')} or {k('PgUp')} retake<br>"
+            f"{k(chr(0x2192))} or {k('PgDn')} next &nbsp; {k(chr(0x2190))} previous<br>"
+            f"{k(chr(0x2191) + ' ' + chr(0x2193))} speed &nbsp; {k('+ ' + chr(0x2212))} size<br>"
+            f"{k('G')} keep take &nbsp; {k('P')} play last take<br>"
+            f"{k('M')} mirror &nbsp; {k('D')} directions &nbsp; {k('F')} fullscreen<br>"
+            f"{k('E')} edit &nbsp; {k('Home')} top &nbsp; {k('H')} hide this<br>Mouse wheel nudges")
+        self.editor_hint.setText(
+            f"<span style='color:{C['muted']}'>Paste or edit your script. "
+            f"<span style='color:{C['cue']}'>## Heading | Clip name</span> starts a section (the clip name "
+            f"names its takes) {chr(0xB7)} <span style='color:{C['cue']}'>[brackets]</span> are stage directions "
+            f"{chr(0xB7)} a blank line starts a new paragraph.</span>")
+
+    # --- colours: follow the app by default -----------------------------------------------
+    THEMES = ("auto", "night", "day")
+    THEME_LABELS = {"auto": chr(0x25D0) + " Auto", "night": chr(0x263E) + " Dark", "day": chr(0x2600) + " Light"}
+
+    def _theme_mode(self) -> str:
+        from ..ui import theme
+
+        pref = self.prefs.get("theme", "auto")
+        return pref if pref in ("night", "day") else theme.MODE
+
+    def apply_theme(self):
+        """Re-colour everything (the app's theme or the prompter's own choice changed)."""
+        C.update(palette(self._theme_mode()))
+        self.setStyleSheet(build_style())
+        self._fill_rich_text()
+        self.theme_btn.setText(self.THEME_LABELS.get(self.prefs.get("theme", "auto"), self.THEME_LABELS["auto"]))
+        self.stage.rebuild()
+        self.update()
+
+    def _cycle_theme(self):
+        cur = self.prefs.get("theme", "auto")
+        self.prefs["theme"] = self.THEMES[(self.THEMES.index(cur) + 1) % 3] if cur in self.THEMES else "auto"
+        self.apply_theme()
 
     def _btn(self, text, fn, tip="", name="") -> QPushButton:
         b = QPushButton(text)

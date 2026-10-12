@@ -140,20 +140,39 @@ def publish(files: list[Path]):
 
 NOTES = """## macOS ({arch})
 
-* **VoiceCleaner-{v}-macos-{arch}.dmg**: open it and drag VoiceCleaner to Applications.
-* **VoiceCleaner-{v}-macos-{arch}.zip**: the same app, zipped.
+| | Download | Size |
+|---|---|---|
+| **Mac** ({chip}) | [`{dmg}`]({base}/{dmg}): open it and drag VoiceCleaner to Applications | {dmg_size} |
+| | [`{zip}`]({base}/{zip}): the same app, zipped | {zip_size} |
+| | [`{sums}`]({base}/{sums}): checksums to verify the downloads | |
 
-Requires macOS 12 or newer on {chip}. Noise reduction runs on the CPU and Voice Re-synthesis on the
-Apple GPU (Apple Silicon). The 490 MB voice
-re-synthesis model downloads the first time that feature is used; everything else works offline.
+Requires macOS 12 or newer. Noise reduction runs on the CPU and Voice Re-synthesis on the
+Apple GPU (Apple Silicon). The 490 MB voice re-synthesis model downloads the first time that
+feature is used; everything else works offline.
 
 {gatekeeper}
-Desktop-audio (loopback) recording is not available on macOS, because macOS has no system
-loopback device. Microphone recording works; macOS asks for permission the first time.
+**Desktop audio:** *System audio (all apps)* records what the Mac plays (macOS 14.2 or newer;
+macOS asks once for *System Audio Recording* permission). On older macOS, install a loopback
+driver such as BlackHole; it is then listed under Desktop audio. Microphone recording works
+on every version; macOS asks for permission the first time.
 
 Files: preferences in `~/Library/Application Support/VoiceCleaner`, logs in
 `~/Library/Logs/VoiceCleaner`, sessions in `~/Documents/VoiceCleaner Sessions`.
 """
+
+
+def release_notes(files: list[Path], sums: Path, notarized: bool) -> str:
+    """The macOS section of the release notes, with download links like the Windows table."""
+    by_ext = {f.suffix: f for f in files}
+    mb = lambda f: f"{f.stat().st_size / 1e6:.0f} MB"  # noqa: E731
+    return NOTES.format(
+        arch=ARCH, chip="Apple Silicon, M1 or later" if ARCH == "arm64" else "Intel",
+        base=f"https://github.com/{REPO}/releases/download/{TAG}",
+        dmg=by_ext[".dmg"].name, zip=by_ext[".zip"].name, sums=sums.name,
+        dmg_size=mb(by_ext[".dmg"]), zip_size=mb(by_ext[".zip"]),
+        gatekeeper="" if notarized else UNSIGNED)
+
+
 UNSIGNED = """**First launch:** this build is not notarized by Apple, so macOS blocks it the first time.
 1. Open VoiceCleaner from Applications. When macOS says it cannot verify it, click **Done**.
 2. Open **System Settings > Privacy & Security**, scroll down and click **Open Anyway**
@@ -205,10 +224,7 @@ def main():
     files = [dmg, zipf]
     sums = OUT / "SHA256SUMS-macos.txt"
     sums.write_text("".join(f"{sha256(f)}  {f.name}\n" for f in files), encoding="utf-8")
-    chip = "Apple Silicon (M1 or later)" if ARCH == "arm64" else "an Intel Mac"
-    (OUT / "RELEASE_NOTES-macos.md").write_text(
-        NOTES.format(v=APP_VERSION, arch=ARCH, chip=chip, gatekeeper="" if a.notarize else UNSIGNED),
-        encoding="utf-8")
+    (OUT / "RELEASE_NOTES-macos.md").write_text(release_notes(files, sums, bool(a.notarize)), encoding="utf-8")
     for f in files + [sums]:
         print(f"  {f.relative_to(ROOT)}  ({f.stat().st_size / 1e6:.0f} MB)")
     if a.publish:

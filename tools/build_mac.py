@@ -49,6 +49,19 @@ def run(*cmd, cwd=ROOT):
     subprocess.run([str(c) for c in cmd], cwd=cwd, check=True)
 
 
+HELPER_SRC = ROOT / "packaging" / "macos" / "systemaudio.swift"
+HELPER_OUT = ROOT / "build" / "macos" / "vc-systemaudio"
+
+
+def build_helper() -> Path:
+    """Compile the system-audio helper (Core Audio taps need macOS 14.2; the app checks the
+    version before using it, so the app itself still runs on macOS 12)."""
+    HELPER_OUT.parent.mkdir(parents=True, exist_ok=True)
+    target = "arm64-apple-macos14.2" if ARCH == "arm64" else "x86_64-apple-macos14.2"
+    run("swiftc", "-O", "-target", target, HELPER_SRC, "-o", HELPER_OUT)
+    return HELPER_OUT
+
+
 def build(python: Path, skip_tests: bool) -> Path:
     if not skip_tests:
         run(python, "-m", "pytest", "-q")
@@ -57,6 +70,7 @@ def build(python: Path, skip_tests: bool) -> Path:
     run(python, "-m", "PyInstaller", "--noconfirm", "--clean",
         "--distpath", APP.parent, "--workpath", ROOT / "build" / "pyi-mac", "VoiceCleaner.spec")
     shutil.rmtree(APP.parent / "VoiceCleaner", ignore_errors=True)  # one-folder copy, already inside the .app
+    shutil.copy2(build_helper(), APP / "Contents" / "MacOS" / HELPER_OUT.name)  # signed with the app below
 
     res = APP / "Contents" / "Resources"
     models_out = res / "models"

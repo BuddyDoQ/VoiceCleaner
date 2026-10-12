@@ -108,8 +108,12 @@ release. On macOS:
 * noise reduction runs on the CPU (about 30x realtime on Apple Silicon, faster than on the
   Apple GPU for this small model), and voice re-synthesis runs on the Apple GPU (about 3x
   realtime instead of 0.6x on the CPU; *CPU only* in the menu turns this off);
-* desktop-audio (loopback) recording is unavailable because macOS has no system loopback
-  device; microphone recording works, and macOS asks for permission the first time;
+* desktop audio: *System audio (all apps)* records everything the Mac plays except
+  VoiceCleaner itself, through a Core Audio process tap (macOS 14.2 or newer; the small
+  `vc-systemaudio` helper in the app, built from `packaging/macos/systemaudio.swift`). macOS
+  asks once for *System Audio Recording* permission. On older macOS, a loopback driver
+  such as BlackHole works: it is listed under Desktop audio. Microphone recording works on
+  every version, and macOS asks for permission the first time;
 * preferences and downloaded models live in `~/Library/Application Support/VoiceCleaner`,
   and logs in `~/Library/Logs/VoiceCleaner`.
 
@@ -250,7 +254,8 @@ The guiding rule is *better speech, not obviously processed speech*.
 * **Record:** click **● Record** on the Original track (or *Record Audio* on the start
   screen, or press `R`). Pick a microphone (USB, headset, line-in) and/or **desktop
   audio**: anything playing through a chosen speaker or headphone output, captured via
-  WASAPI loopback, so no "Stereo Mix" is needed. Recording both at once captures both
+  WASAPI loopback, so no "Stereo Mix" is needed (on a Mac: *System audio*, macOS 14.2+, or
+  a loopback driver such as BlackHole). Recording both at once captures both
   sides of a call; the two are aligned and clock-drift corrected. Per-source level
   meters and trims are shown, and the take is drawn live on the Original waveform.
   With a file already open, choose how the take relates to it:

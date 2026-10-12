@@ -91,6 +91,9 @@ if MAC:
             "NSRequiresAquaSystemAppearance": False,  # follow Dark Mode
             # without this macOS silently delivers silence to the recorder
             "NSMicrophoneUsageDescription": "VoiceCleaner records from your microphone when you click Record.",
+            # system audio through a Core Audio tap (macOS 14.2+, vc-systemaudio helper)
+            "NSAudioCaptureUsageDescription": "VoiceCleaner records what your Mac plays (desktop audio) when you "
+                                              "choose System audio and click Record.",
             "CFBundleDocumentTypes": [{
                 "CFBundleTypeName": "WAVE Audio",
                 "CFBundleTypeRole": "Editor",

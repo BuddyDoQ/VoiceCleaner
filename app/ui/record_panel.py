@@ -6,6 +6,7 @@ meters, and record. The take is drawn live on the Original waveform.
 """
 from __future__ import annotations
 
+import sys
 import time
 
 import numpy as np
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxL
                                QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget)
 
 from ..audio.loader import format_duration
+from ..audio import mac_system_audio
 from ..audio.recorder import MIC_PRIVACY_HINT, MODES, InputSource, RecordingError, RecordingSession, list_sources
 from ..utils.logging import get_logger
 from ..workers.processing_worker import run_task
@@ -184,9 +186,17 @@ class RecordPanel(QFrame):
         v.addLayout(head)
 
         self.mic_row = _SourceRow("Microphone", "No microphone")
-        self.desk_row = _SourceRow("Desktop audio", "No desktop audio")
-        self.desk_row.combo.setToolTip("Records what this computer plays through the chosen speakers or headphones\n"
-                                       "(e.g. the other side of a call, a video, a browser tab).")
+        if sys.platform == "darwin":
+            why = mac_system_audio.unavailable_reason()
+            self.desk_row = _SourceRow("Desktop audio", f"None ({why}; or install BlackHole)" if why else "Off")
+            self.desk_row.combo.setToolTip(
+                "Records what this Mac plays (the other side of a call, a video, a browser tab):\n"
+                "System audio records all apps except VoiceCleaner itself (macOS 14.2 or newer; macOS asks\n"
+                "once for permission). A loopback driver such as BlackHole is listed here too.")
+        else:
+            self.desk_row = _SourceRow("Desktop audio", "No desktop audio")
+            self.desk_row.combo.setToolTip("Records what this computer plays through the chosen speakers or headphones\n"
+                                           "(e.g. the other side of a call, a video, a browser tab).")
         v.addWidget(self.mic_row)
         v.addWidget(self.desk_row)
 

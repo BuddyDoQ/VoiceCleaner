@@ -24,6 +24,12 @@
   recording and Compile takes are closed. If the open recording was enhanced but not
   exported, VoiceCleaner offers to export it first. The start screen lists the session's
   newest recordings under **THIS SESSION**.
+- **Mac: desktop audio recording.** *System audio (all apps)* under Desktop audio records what
+  the Mac plays (the other side of a call, a video, a browser tab), alone or together with a
+  microphone, aligned and drift-corrected as on Windows. It uses macOS's own system-audio
+  capture (macOS 14.2 or newer; macOS asks once for permission) and leaves out VoiceCleaner's
+  own playback, so an overdub never records the Original. On older macOS, a loopback driver
+  such as BlackHole is listed under Desktop audio instead of Microphone.
 
 ## 1.1.0
 

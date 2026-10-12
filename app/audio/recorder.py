@@ -34,6 +34,7 @@ import soundfile as sf
 
 from ..utils.errors import VoiceCleanerError
 from ..utils.logging import get_logger
+from . import mac_system_audio
 from .loader import AudioData
 
 log = get_logger("recorder")
@@ -44,6 +45,7 @@ OVERVIEW_BLOCK = 64  # must match ui.waveform.OVERVIEW_BLOCK
 SILENCE_WARN_S = 3.0
 
 
+SYSTEM_AUDIO_PRIVACY_HINT = "System Settings → Privacy & Security → Screen & System Audio Recording"
 MIC_PRIVACY_HINT = ("System Settings → Privacy & Security → Microphone" if sys.platform == "darwin"
                     else "Settings → Privacy → Microphone")
 
@@ -87,11 +89,17 @@ def list_sources() -> tuple[list[InputSource], list[InputSource]]:
     except Exception:
         default_spk = None
     mics, desktop = [], []
-    for m in sc.all_microphones(include_loopback=True):
+    mac = sys.platform == "darwin"  # no loopback devices on macOS (soundcard only warns)
+    for m in sc.all_microphones(include_loopback=not mac):
         if m.isloopback:
             desktop.append(InputSource(m.id, m.name, "desktop", m.channels, m.id == default_spk))
+        elif mac and mac_system_audio.is_loopback_driver(m.name):  # BlackHole & co. capture what the Mac plays
+            desktop.append(InputSource(m.id, m.name, "desktop", m.channels))
         else:
             mics.append(InputSource(m.id, m.name, "microphone", m.channels, m.id == default_mic))
+    if mac and mac_system_audio.available():
+        desktop.append(InputSource(mac_system_audio.SYSTEM_AUDIO_ID, mac_system_audio.SYSTEM_AUDIO_NAME,
+                                   "desktop", 2))
     key = lambda s: (not s.is_default, s.name.lower())  # noqa: E731
     return sorted(mics, key=key), sorted(desktop, key=key)
 
@@ -252,13 +260,19 @@ class RecordingSession:
     def _capture(self, sc, st: _SourceState):
         _co_initialize()
         try:
-            mic = sc.get_microphone(st.source.id, include_loopback=st.source.kind == "desktop")
-            channels = max(1, min(2, st.source.channels))
+            if st.source.id == mac_system_audio.SYSTEM_AUDIO_ID:
+                recorder = mac_system_audio.SystemAudioRecorder(RECORD_SR)
+                channels = 2
+            else:
+                loopback = st.source.kind == "desktop" and sys.platform != "darwin"
+                mic = sc.get_microphone(st.source.id, include_loopback=loopback)
+                channels = max(1, min(2, st.source.channels))
+                recorder = mic.recorder(samplerate=RECORD_SR, channels=channels, blocksize=BLOCK_FRAMES)
             with sf.SoundFile(str(st.part_path), "w", samplerate=RECORD_SR, channels=channels, subtype="FLOAT") as f, \
                     warnings.catch_warnings():
                 # soundcard warns about "data discontinuity" when loopback has nothing playing
                 warnings.simplefilter("ignore")
-                with mic.recorder(samplerate=RECORD_SR, channels=channels, blocksize=BLOCK_FRAMES) as rec:
+                with recorder as rec:
                     while not self._stop.is_set():
                         block = np.asarray(rec.record(numframes=BLOCK_FRAMES * 5), dtype=np.float32)
                         if block.ndim == 1:
@@ -270,6 +284,10 @@ class RecordingSession:
                         f.write(block)
                         self._update_stats(st, block)
                         st.end_time = now
+        except mac_system_audio.SystemAudioError as exc:
+            log.warning("System audio capture failed: %s", exc)
+            st.error = (f"System audio could not be recorded ({exc}). Check that VoiceCleaner may record "
+                        f"system audio ({SYSTEM_AUDIO_PRIVACY_HINT}).")
         except Exception as exc:
             msg = str(exc) or type(exc).__name__
             log.warning("Capture from %s stopped: %s", st.source.name, msg)
@@ -300,10 +318,13 @@ class RecordingSession:
             errors = " ".join(self.errors)
             raise RecordingError(errors or "Nothing was recorded. Check that the input device is connected.")
         warn = list(self.errors)
-        silent = [st.source.name for st in usable if st.max_peak < 1e-6]
-        for name in silent:
-            warn.append(f"“{name}” delivered only silence. If it is a microphone, check that it is "
-                        f"not muted and that VoiceCleaner may use it ({MIC_PRIVACY_HINT}).")
+        for st in (st for st in usable if st.max_peak < 1e-6):
+            if st.source.id == mac_system_audio.SYSTEM_AUDIO_ID:
+                warn.append("System audio delivered only silence. If something was playing, check that "
+                            f"VoiceCleaner may record system audio ({SYSTEM_AUDIO_PRIVACY_HINT}).")
+            else:
+                warn.append(f"“{st.source.name}” delivered only silence. If it is a microphone, check that it "
+                            f"is not muted and that VoiceCleaner may use it ({MIC_PRIVACY_HINT}).")
 
         tracks = []
         for st in usable:

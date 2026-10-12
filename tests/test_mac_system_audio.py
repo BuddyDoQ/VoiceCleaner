@@ -47,6 +47,9 @@ def fake_helper(tmp_path, monkeypatch):
         path = tmp_path / f"vc-systemaudio-{mode}"
         path.write_text(FAKE_HELPER.format(python=sys.executable, mode=mode))
         path.chmod(path.stat().st_mode | stat.S_IEXEC)
+        if sys.platform == "win32":  # Windows cannot start a "#!" script: launch it through Python
+            script, path = path, tmp_path / f"vc-systemaudio-{mode}.cmd"
+            path.write_text(f'@"{sys.executable}" "{script}"' + chr(10))
         monkeypatch.setenv("VOICECLEANER_SYSTEMAUDIO_HELPER", str(path))
         return path
     return make
@@ -134,7 +137,7 @@ def test_session_records_system_audio_and_warns_on_silence(fake_helper, tmp_path
     fake_helper("ramp")
     s = recorder.RecordingSession([src], out_dir=tmp_path)
     s.start()
-    time.sleep(0.6)
+    time.sleep(1.5)  # the helper takes a moment to start (longer on Windows, via cmd)
     res = s.stop()
     x, sr = sf.read(res.path, dtype="float32", always_2d=True)
     assert sr == 48_000 and x.shape[1] == 2 and res.duration > 0.3 and np.abs(x).max() > 0.5

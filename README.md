@@ -11,6 +11,64 @@ A/B switch, and export.
 It works fully offline. It runs on any CPU and uses an NVIDIA GPU automatically when one
 is present.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/enhance-dark.png">
+  <img alt="VoiceCleaner: the Enhance tab after enhancing, with the original and enhanced waveforms, A/B switch and measurements" src="docs/screenshots/enhance-light.png">
+</picture>
+
+## Screenshots
+
+**Teleprompter:** read your script while it records, one take per section. Retake any
+section; the takes are enhanced automatically.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/teleprompter-dark.png">
+  <img alt="The teleprompter recording a script, with the reading line, REC indicator and take number" src="docs/screenshots/teleprompter-light.png">
+</picture>
+
+<img alt="The teleprompter moving on to the next section" src="docs/screenshots/teleprompter.gif" width="720">
+
+**Compile:** the teleprompter's takes in script order, ready to join into one file.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/compile-dark.png">
+  <img alt="The Compile tab listing teleprompter takes in script order with a preview of the compilation" src="docs/screenshots/compile-light.png">
+</picture>
+
+<table>
+<tr>
+<td width="62%">
+
+**Batch:** enhance many files at once, with the same settings sidebar as Enhance.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/batch-dark.png">
+  <img alt="Batch processing of three files with the settings sidebar" src="docs/screenshots/batch-light.png">
+</picture>
+
+</td>
+<td>
+
+**Smart settings and presets:** analysis sets the cleanup for each recording.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/settings-dark.png">
+  <img alt="The settings sidebar with preset, Smart settings note and AUTO sliders" src="docs/screenshots/settings-light.png" width="300">
+</picture>
+
+</td>
+</tr>
+</table>
+
+**Updates:** VoiceCleaner downloads, checks and installs new versions itself (Windows).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/update-dark.png">
+  <img alt="The update window: downloaded and verified, ready to install and restart" src="docs/screenshots/update-light.png" width="560">
+</picture>
+
+Screenshots are generated with `python tools/screenshots.py` (demo content, both themes).
+
 ## Quick start (from source)
 
 Requires Windows and **Python 3.11** (DeepFilterNet's native library ships Windows

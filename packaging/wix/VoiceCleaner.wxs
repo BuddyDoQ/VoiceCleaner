@@ -66,7 +66,17 @@
       <Files Include="$(var.SourceDir)\**" Directory="INSTALLFOLDER" />
       <ComponentRef Id="StartMenuShortcut" />
       <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="InstallFolderRegistry" />
     </Feature>
+
+    <!-- where VoiceCleaner is installed (1.0.9+): the in-app updater installs the next
+         version into the same folder, and tells an installed copy from a portable one -->
+    <Component Id="InstallFolderRegistry" Directory="INSTALLFOLDER" Guid="E1B7C2A4-5D3F-4A8E-9B6C-3F2D1A0E7C59">
+      <RegistryValue Root="HKLM" Key="Software\Steamburger Studios\VoiceCleaner" Name="InstallFolder"
+                     Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+      <RegistryValue Root="HKLM" Key="Software\Steamburger Studios\VoiceCleaner" Name="Edition"
+                     Type="string" Value="$(var.Edition)" />
+    </Component>
 
     <Component Id="StartMenuShortcut" Directory="AppMenuFolder" Guid="7D3F4E6B-2B0B-4C8E-9C1A-5A3D1E0F7B21">
       <Shortcut Id="StartMenuShortcut" Name="VoiceCleaner" Description="Speech cleanup and enhancement"

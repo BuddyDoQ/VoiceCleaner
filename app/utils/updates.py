@@ -1,13 +1,14 @@
 """Checking GitHub for a newer VoiceCleaner release.
 
 One HTTPS GET of the repository's public "latest release" (drafts and pre-releases
-are excluded by GitHub). Nothing about the user, the computer or any audio is sent,
-and nothing is downloaded or installed automatically: the app only offers a link to
-the installer that fits this computer.
+are excluded by GitHub). Nothing about the user, the computer or any audio is sent.
+Nothing is downloaded or installed unless the user chooses *Install Update*
+(see :mod:`app.utils.update_install`).
 """
 from __future__ import annotations
 
 import json
+import os
 import platform
 import re
 import sys
@@ -19,7 +20,8 @@ from dataclasses import dataclass, field
 from .config import APP_NAME, APP_VERSION, edition
 
 REPO = "BuddyDoQ/VoiceCleaner"
-LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
+# VOICECLEANER_UPDATE_FEED points the check at another "latest release" JSON (testing)
+LATEST_URL = os.environ.get("VOICECLEANER_UPDATE_FEED") or f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases"
 REMIND_LATER_S = 24 * 3600  # "Later" hides that version from automatic checks this long
 TIMEOUT_S = 10
@@ -34,6 +36,7 @@ class Asset:
     name: str
     url: str
     size: int = 0
+    sha256: str = ""  # GitHub's digest of the file, used to verify a download
 
 
 @dataclass(frozen=True)
@@ -68,7 +71,12 @@ def parse_release(data: dict) -> ReleaseInfo:
         tag = str(data["tag_name"])
     except (KeyError, TypeError) as exc:
         raise UpdateError("GitHub returned an unexpected answer.") from exc
-    assets = tuple(Asset(str(a.get("name", "")), str(a.get("browser_download_url", "")), int(a.get("size") or 0))
+    def digest(a: dict) -> str:
+        d = str(a.get("digest") or "")
+        return d.split(":", 1)[1].lower() if d.lower().startswith("sha256:") else ""
+
+    assets = tuple(Asset(str(a.get("name", "")), str(a.get("browser_download_url", "")), int(a.get("size") or 0),
+                         digest(a))
                    for a in data.get("assets") or [] if isinstance(a, dict))
     return ReleaseInfo(version=tag.lstrip("vV"), tag=tag, page_url=str(data.get("html_url") or RELEASES_PAGE),
                        notes=str(data.get("body") or ""), published=str(data.get("published_at") or "")[:10],

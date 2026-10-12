@@ -359,10 +359,26 @@ standardized intelligibility measure.
 ## Updates
 
 *Check for Updates…* in the app menu asks GitHub for the latest published release. If
-there is a newer version, the app shows what is new and offers the download that fits
-this computer (macOS DMG, Windows installer, or the GPU web installer); it opens in the
-browser and installs like any other version. Nothing is downloaded or installed
-automatically, and nothing about you, your computer or your audio is sent.
+there is a newer version, the app shows what is new and how to get it. Nothing is
+downloaded or installed until you choose to, and nothing about you, your computer or
+your audio is sent.
+
+* **Installed on Windows (1.0.9 and later):** *Install Update* downloads the installer
+  inside the app (with progress; an interrupted download continues where it stopped),
+  checks it against the SHA-256 checksum GitHub publishes for the file, and then offers
+  *Install and Restart* or *Install When I Quit*. VoiceCleaner closes, the installer runs
+  with a progress bar (Windows asks for permission, as VoiceCleaner is installed for all
+  users), and VoiceCleaner opens again in the same folder and confirms the update. The GPU
+  edition runs its web installer, which downloads the ~2 GB update with its own progress
+  window. Downloads are kept in `%LOCALAPPDATA%\VoiceCleaner\updates` until the update is
+  installed.
+* **Portable copies:** *Download* opens the release page to pick the portable download.
+* **macOS:** *Download* fetches and checks the DMG, then shows it in Finder; drag the new
+  VoiceCleaner to Applications.
+
+To try the in-place update on a PC before publishing a version, install the locally built
+MSI and run `python tools/update_e2e_local.py`: it offers that installer as a pretend newer
+release to the installed app.
 
 By default the app also checks automatically every time it starts (one small request,
 a few seconds after starting) and only speaks up when there is something new. *Later*

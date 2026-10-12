@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.9
+
+- **Install updates from inside VoiceCleaner (Windows).** When an update is available,
+  *Install Update* downloads it in the app (with progress, and an interrupted download
+  continues where it stopped), checks it against the checksum GitHub publishes, and then
+  installs it: *Install and Restart* now, or *Install When I Quit*. VoiceCleaner closes, the
+  installer runs with a progress bar (Windows asks for permission), and VoiceCleaner opens
+  again and confirms the new version. The GPU edition runs its web installer, which downloads
+  the update with its own progress window.
+  - This works from 1.0.9 on: the installer now records where VoiceCleaner is installed, so
+    updates go into the same folder. To get 1.0.9 itself, install it as before.
+  - Portable copies keep opening the release page; on macOS the DMG is downloaded, checked
+    and shown in Finder.
+- Quitting during work still asks first; an update chosen with *Install and Restart* then
+  waits until you quit.
+
 ## 1.0.8
 
 - **Mac: voice re-synthesis on the Apple GPU.** On Apple Silicon Macs, Voice Re-synthesis now

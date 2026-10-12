@@ -26,7 +26,7 @@ from ..audio.pipeline import EnhancementPipeline, PipelineResult
 from ..audio.settings import ProcessingSettings, apply_simple, from_preset, preset_names
 from ..export.mp3_exporter import export_mp3
 from ..export.wav_exporter import ExportOptions, export_wav
-from ..utils import updates, user_presets
+from ..utils import update_install, updates, user_presets
 from ..utils.config import APP_NAME, APP_VERSION, UserConfig, edition, log_dir, models_dir, user_models_dir
 from ..utils.logging import get_logger
 from ..utils.shell import REDO_KEYS, reveal, shortcut_text
@@ -95,6 +95,7 @@ class MainWindow(QMainWindow):
         self._preview_task = None
         self._preview_gen = 0
         self._export_after_enhance = False
+        self._pending_update = None  # (plan, installer, version, relaunch): installed when the app closes
         self._pending_warnings: list[str] = []
         self._last_notes: list[str] = []
 
@@ -179,6 +180,7 @@ class MainWindow(QMainWindow):
         self.update_checker.upToDate.connect(self._update_up_to_date)
         self.update_checker.failed.connect(self._update_failed)
         QTimer.singleShot(4000, self._auto_check_updates)  # after startup has settled
+        QTimer.singleShot(1500, self._report_update_result)
 
     # ================================================================================== UI
     def _build_header(self) -> QWidget:
@@ -1603,9 +1605,42 @@ class MainWindow(QMainWindow):
                 self.config.save()
             except OSError:
                 pass
+            if code in (UpdateDialog.INSTALL_NOW, UpdateDialog.INSTALL_ON_QUIT) and dlg.installer is not None:
+                now = code == UpdateDialog.INSTALL_NOW
+                self._pending_update = (dlg.plan, dlg.installer, release.version, now)
+                if now:
+                    QTimer.singleShot(0, self.close)  # asks first if work is in progress
+                else:
+                    self.status_label.setText(f"VoiceCleaner {release.version} will be installed when you quit.")
 
         dlg.finished.connect(closed)
         dlg.open()  # window-modal but non-blocking: an automatic check never stalls the app
+
+    def _report_update_result(self):
+        """After an update was installed (or not), say so once."""
+        if not self.isVisible():
+            QTimer.singleShot(1000, self._report_update_result)
+            return
+        outcome = update_install.take_last_result()
+        if outcome is None:
+            return
+        log.info("Last update install: code %s for %s", outcome.code, outcome.version)
+        if outcome.ok and outcome.version == APP_VERSION:
+            update_install.cleanup()  # the installer is no longer needed
+            self.status_label.setText(outcome.message())
+            QMessageBox.information(self, "Update installed", outcome.message())
+        else:
+            QMessageBox.warning(self, "Update not installed", outcome.message())
+
+    def _start_pending_update(self):
+        """Run the downloaded installer once this window has closed."""
+        plan, installer, version, relaunch = self._pending_update
+        try:
+            update_install.launch_installer(plan, installer, version, relaunch)
+        except Exception as exc:  # noqa: BLE001 - quitting must still work
+            log.exception("Could not start the update installer")
+            QMessageBox.warning(self, "Update not installed",
+                                f"The installer could not be started ({exc}). Install it from {installer.parent}.")
 
     def _update_up_to_date(self, release, manual: bool):
         self._update_checked()
@@ -1881,6 +1916,10 @@ class MainWindow(QMainWindow):
             box.exec()
             if box.clickedButton() is not quit_btn:
                 e.ignore()
+                if self._pending_update is not None and self._pending_update[3]:
+                    # "Install and Restart" while busy: install when the user quits instead
+                    self._pending_update = self._pending_update[:3] + (False,)
+                    self.status_label.setText(f"VoiceCleaner {self._pending_update[2]} will be installed when you quit.")
                 return
         if self._task_running():
             self.task.cancel()
@@ -1913,4 +1952,6 @@ class MainWindow(QMainWindow):
             c.save()
         except OSError as exc:
             log.warning("Could not save preferences: %s", exc)
+        if self._pending_update is not None:
+            self._start_pending_update()
         super().closeEvent(e)

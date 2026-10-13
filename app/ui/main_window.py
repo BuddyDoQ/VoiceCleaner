@@ -45,7 +45,7 @@ from .brand import STUDIO_NAME, AboutDialog, OpenSessionDialog, SessionNameDialo
 from .compile_panel import CompilePanel
 from .playback_panel import PlaybackPanel
 from .update_dialog import UpdateChecker, UpdateDialog
-from .widgets import DropZone, ElidedLabel, MetricsPanel, card, label, reserve_bold_width
+from .widgets import DropZone, ElidedLabel, MetricsPanel, ThemeToggle, card, label, reserve_bold_width
 
 log = get_logger("ui")
 
@@ -98,6 +98,9 @@ class MainWindow(QMainWindow):
         self._after_export = None  # runs after the Enhance tab's export succeeds (e.g. switch session)
         self._compile_link = None  # (recording, enhanced file, Compile row) when opened from Compile
         self._tour = None  # the Getting Started / What's New overlay, while shown
+        from . import wheel_guard
+
+        wheel_guard.install()  # the wheel scrolls panels; it adjusts only a control that was clicked
         self._preview_task = None
         self._preview_gen = 0
         self._export_after_enhance = None  # what to finish once "Enhance Again" is done (export / update)
@@ -247,13 +250,15 @@ class MainWindow(QMainWindow):
         longest = "● UPDATING PREVIEW · 100%  +9"
         self.activity_chip.setFixedWidth(self.activity_chip.fontMetrics().horizontalAdvance(longest) + 34)
         lay.addWidget(self.activity_chip)
-        self.device_chip = label("Detecting hardware\u2026", "chip")
+        # status, not buttons: plain text
+        self.device_chip = label("Detecting hardware\u2026", "status")
         self.device_chip.setToolTip("The processor used for AI enhancement. Change it in the menu.")
-        self.model_chip = label("Loading AI model\u2026", "chip")
+        self.model_chip = label("Loading AI model\u2026", "status")
         lay.addWidget(self.device_chip)
+        lay.addWidget(label("\u00b7", "status"))
         lay.addWidget(self.model_chip)
-        self.theme_btn = QPushButton()
-        self.theme_btn.setProperty("role", "themetoggle")
+        lay.addSpacing(8)
+        self.theme_btn = ThemeToggle()
         self.theme_btn.clicked.connect(self._toggle_theme)
         lay.addWidget(self.theme_btn)
         self._update_theme_button()
@@ -307,6 +312,16 @@ class MainWindow(QMainWindow):
             agroup.addAction(a)
             appearance.addAction(a)
             self.theme_actions[key] = a
+        appearance.addSeparator()
+        fgroup = QActionGroup(self)
+        self.font_actions = {}
+        for key, text in (("system", "System Fonts (most readable)"), ("brand", "Brand Fonts (Steamburger Studios)")):
+            a = QAction(text, self, checkable=True)
+            a.setChecked(self.config.extra.get("fonts", "system") == key)
+            a.triggered.connect(lambda _=False, k=key: self.set_fonts(k))
+            fgroup.addAction(a)
+            appearance.addAction(a)
+            self.font_actions[key] = a
         m.addSeparator()
         m.addAction("Teleprompter\u2026", self.open_teleprompter, QKeySequence("Ctrl+T"))
         m.addSeparator()
@@ -363,12 +378,17 @@ class MainWindow(QMainWindow):
 
         top = QHBoxLayout()
         top.setSpacing(10)
+        # the file name, with its details in one quiet line right under it
+        name_col = QVBoxLayout()
+        name_col.setSpacing(0)
         self.file_name = ElidedLabel("")
         self.file_name.setProperty("role", "title")
-        top.addWidget(self.file_name, 1)
+        name_col.addWidget(self.file_name)
         self.meta_chips = QHBoxLayout()
-        self.meta_chips.setSpacing(6)
-        top.addLayout(self.meta_chips)
+        self.meta_chips.setSpacing(0)
+        self.meta_chips.setContentsMargins(1, 0, 0, 0)
+        name_col.addLayout(self.meta_chips)
+        top.addLayout(name_col, 1)
         another = QPushButton("Open Another…")
         another.setProperty("role", "ghost")
         another.clicked.connect(self.choose_file)
@@ -534,10 +554,21 @@ class MainWindow(QMainWindow):
                                   "noise (no speech), then click here. VoiceCleaner will remove that noise.")
         self.learn_btn.clicked.connect(self.learn_noise_profile)
         right.addWidget(self.learn_btn)
+        # one width for both texts (Learn / Clear), so the row does not change size
+        fm = self.learn_btn.fontMetrics()
+        self.learn_btn.setMinimumWidth(max(fm.horizontalAdvance(t) for t in ("Learn Noise Profile",
+                                                                           "Clear Noise Profile")) + 36)
         self.profile_label = label("", "faint")
-        right.addWidget(self.profile_label)
-        right.addStretch(1)
+        # a status note: it may be cut short, but never makes the editor wider than the window
+        self.profile_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.profile_label.setMinimumWidth(0)
+        right.addWidget(self.profile_label, 1)
         return c
+
+    def _set_profile_note(self, text: str):
+        """The note next to Learn Noise Profile (cut short when space is tight; never moves the row)."""
+        self.profile_label.setText(text)
+        self.profile_label.setToolTip(text)
 
     def _fit_transport(self):
         """Stack the transport controls in two rows when one row does not fit the editor,
@@ -546,7 +577,9 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "transport_box"):
             return
         avail = self.editor_scroll.viewport().width() - 44 - 28  # editor and card margins
-        need = self.transport_left.sizeHint().width() + self.transport_right.sizeHint().width() + 30
+        # without the note next to Learn Noise Profile: it is cut short rather than moving the row
+        note = self.profile_label.sizeHint().width() if self.profile_label.isVisible() else 0
+        need = self.transport_left.sizeHint().width() + self.transport_right.sizeHint().width() - note + 30
         direction = QBoxLayout.LeftToRight if need <= avail else QBoxLayout.TopToBottom
         if self.transport_box.direction() != direction:
             self.transport_box.setDirection(direction)
@@ -914,7 +947,7 @@ class MainWindow(QMainWindow):
         self.wave_enh.preview_region = None
         self.player.set_overlay("enhanced", None)
         self.wave_enh.set_selection(None)
-        self.profile_label.setText("")
+        self._set_profile_note("")
         info = audio.info
         self.file_name.setText(info.path.name)
         self.file_name.setToolTip(str(info.path))
@@ -922,9 +955,12 @@ class MainWindow(QMainWindow):
             item = self.meta_chips.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        for text in (format_duration(info.duration), f"{info.sample_rate / 1000:g} kHz", info.channel_label,
-                     info.subtype_label, format_size(info.file_size)):
-            self.meta_chips.addWidget(label(text, "chip"))
+        # plain information, not buttons: one quiet line
+        facts = (format_duration(info.duration), f"{info.sample_rate / 1000:g} kHz", info.channel_label,
+                 info.subtype_label, format_size(info.file_size))
+        meta = label(" · ".join(facts), "meta")
+        meta.setToolTip("Length · sample rate · channels · format · file size")
+        self.meta_chips.addWidget(meta)
         warnings = self._pending_warnings + analysis.warnings()
         self._pending_warnings = []
         if audio.repaired_nonfinite:
@@ -958,6 +994,34 @@ class MainWindow(QMainWindow):
         self._busy(False, "Ready. Adjust settings if you like, then click Enhance.")
         self.speed_label.setText(f"{format_duration(info.duration)} of audio • analyzed automatically")
         log.info("Loaded %s", info.path)
+        self._learn_leading_noise()
+
+    def _learn_leading_noise(self):
+        """A recording that starts with at least a second of background noise (before the
+        first word): learn the noise profile from it, as if it had been selected by hand."""
+        from ..audio.analyzer import FRAME_HOP_S
+
+        a = self.analysis
+        region = noise_profile_mod.leading_noise_region(a.speech_mask, a.frame_level_db, FRAME_HOP_S)
+        if region is None:
+            return
+        if self._use_noise_profile(*region):
+            self._set_profile_note(f"Noise learned from the start ({region[1] - region[0]:.1f} s)")
+            self.status_label.setText("Ready. The noise before the first word was learned automatically "
+                                      "(Clear Noise Profile to undo). Click Enhance.")
+            log.info("Noise profile learned automatically from %.2f-%.2f s", *region)
+
+    def _use_noise_profile(self, a: float, b: float) -> bool:
+        """Learn the noise from ``a``..``b`` seconds and use it from now on."""
+        mono = self.audio.mono() if self.audio.channels > 1 else self.audio.samples[:, 0]
+        profile = noise_profile_mod.estimate(mono, self.audio.sample_rate, [(a, b)], source="learned", margin_s=0.0)
+        if profile is None:
+            return False
+        self.learned_profile = profile
+        self.wave_orig.highlight_regions = [(a, b)]
+        self.wave_orig.update()
+        self.learn_btn.setText("Clear Noise Profile")
+        return True
 
     def _original_rows(self):
         a = self.analysis
@@ -1458,34 +1522,30 @@ class MainWindow(QMainWindow):
                 wv.set_selection(sel)
         self._update_loop()
         if sel and not self.learned_profile:
-            self.profile_label.setText(f"Selected {sel[1] - sel[0]:.1f} s")
+            self._set_profile_note(f"Selected {sel[1] - sel[0]:.1f} s")
         elif not sel and not self.learned_profile:
-            self.profile_label.setText("")
+            self._set_profile_note("")
 
     def learn_noise_profile(self):
         if self.audio is None:
             return
+        if self.learned_profile is not None:  # the button reads "Clear Noise Profile"
+            self.learned_profile = None
+            self.learn_btn.setText("Learn Noise Profile")
+            self._set_profile_note("")
+            self.status_label.setText("Noise profile cleared: noise is detected automatically again.")
+            self.wave_orig.highlight_regions = []
+            self.wave_orig.update()
+            return
         if not self.selection:
-            if self.learned_profile is not None:
-                self.learned_profile = None
-                self.learn_btn.setText("Learn Noise Profile")
-                self.profile_label.setText("Using automatic noise detection")
-                self.wave_orig.highlight_regions = []
-                self.wave_orig.update()
-                return
             QMessageBox.information(
                 self, "Learn Noise Profile",
-                "Drag across a part of the ORIGINAL waveform where nobody is speaking, so only the background "
+                "Drag across a part of either waveform where nobody is speaking, so only the background "
                 "noise is selected. Then click “Learn Noise Profile” again.\n\nA second or two is enough.")
             return
         a, b = self.selection
         if b - a < 0.3:
             QMessageBox.information(self, "Selection too short", "Select at least 0.3 seconds of background noise.")
-            return
-        mono = self.audio.mono() if self.audio.channels > 1 else self.audio.samples[:, 0]
-        profile = noise_profile_mod.estimate(mono, self.audio.sample_rate, [(a, b)], source="learned", margin_s=0.0)
-        if profile is None:
-            self._error("Could not learn noise", "The selection is too short to measure the noise.")
             return
         # warn if the selection looks like it contains speech
         mask = self.analysis.speech_mask
@@ -1496,12 +1556,12 @@ class MainWindow(QMainWindow):
                                      "from speech would remove parts of the voice.\n\nUse it anyway?")
             if r != QMessageBox.Yes:
                 return
-        self.learned_profile = profile
-        self.wave_orig.highlight_regions = [(a, b)]
-        self.wave_orig.set_selection(None)
-        self.selection = None
-        self.learn_btn.setText("Clear Noise Profile")
-        self.profile_label.setText(f"Noise profile learned ({b - a:.1f} s). Click Enhance to apply.")
+        if not self._use_noise_profile(a, b):
+            self._error("Could not learn noise", "The selection is too short to measure the noise.")
+            return
+        self._selection_changed(None)  # one selection, shared by both waveforms
+        self._set_profile_note(f"Noise profile learned ({b - a:.1f} s)")
+        self.status_label.setText("Noise profile learned. Click Enhance to apply it.")
         log.info("Learned noise profile from %.2f-%.2f s", a, b)
 
     # ============================================================================ models
@@ -1952,7 +2012,7 @@ class MainWindow(QMainWindow):
         self.learned_profile = None
         self.selection = None
         self._enh_overview = None
-        self.profile_label.setText("")
+        self._set_profile_note("")
         self.warning_label.setVisible(False)
         self.file_name.setText("")
         self.file_name.setToolTip("")
@@ -2054,14 +2114,27 @@ class MainWindow(QMainWindow):
             self.prompter.apply_theme()  # it follows the app unless set to Dark or Light
         log.info("Theme: %s (%s)", pref, mode)
 
+    def set_fonts(self, style: str):
+        """System or brand fonts, right away."""
+        self.config.extra["fonts"] = style
+        theme.apply(QApplication.instance(), self.theme_pref, fonts=style)
+        if style in getattr(self, "font_actions", {}):
+            self.font_actions[style].setChecked(True)
+        if getattr(self, "prompter", None) is not None:
+            self.prompter.apply_theme()
+        for w in QApplication.instance().allWidgets():
+            w.updateGeometry()
+        log.info("Fonts: %s", style)
+
     def _toggle_theme(self):
         self.set_theme("day" if theme.MODE == "night" else "night")
 
     def _update_theme_button(self):
         if hasattr(self, "theme_btn"):
             night = theme.MODE == "night"
-            self.theme_btn.setText("\u263e" if night else "\u2600")
+            self.theme_btn.setAccessibleName("Switch to day mode" if night else "Switch to night mode")
             self.theme_btn.setToolTip("Switch to day mode" if night else "Switch to night mode")
+            self.theme_btn.update()
 
     def _system_scheme_changed(self, *_):
         if self.theme_pref == "auto":

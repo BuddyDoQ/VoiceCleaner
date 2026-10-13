@@ -88,19 +88,19 @@ class SplashScreen(QWidget):
 
         p.drawPixmap(34, 44, self._logo)
         x = 140
-        f = QFont(theme.FONT_MONO)
+        f = QFont(theme.BRAND_MONO)
         f.setPointSizeF(theme.pt(8))
         f.setLetterSpacing(QFont.AbsoluteSpacing, 2)
         p.setFont(f)
         p.setPen(theme.qcolor(theme.ACCENT))
         p.drawText(QRectF(x, 44, W - x - 24, 16), Qt.AlignLeft | Qt.AlignVCenter, STUDIO_NAME.upper())
-        f = QFont(theme.FONT_DISPLAY)
+        f = QFont(theme.BRAND_DISPLAY)
         f.setPointSizeF(34)
         f.setLetterSpacing(QFont.AbsoluteSpacing, 1)
         p.setFont(f)
         p.setPen(theme.qcolor(theme.TEXT))
         p.drawText(QRectF(x, 60, W - x - 24, 52), Qt.AlignLeft | Qt.AlignVCenter, APP_NAME.upper())
-        f = QFont(theme.FONT_MONO)
+        f = QFont(theme.BRAND_MONO)
         f.setPointSizeF(theme.pt(8))
         f.setLetterSpacing(QFont.AbsoluteSpacing, 2)
         p.setFont(f)
@@ -108,7 +108,7 @@ class SplashScreen(QWidget):
         p.drawText(QRectF(x, 112, W - x - 24, 16), Qt.AlignLeft | Qt.AlignVCenter, f"VERSION {APP_VERSION}")
 
         # status line and an indeterminate sweep: something is happening
-        f = QFont(theme.FONT_UI)
+        f = QFont(theme.BRAND_UI)
         f.setPointSizeF(9.5)
         p.setFont(f)
         p.setPen(theme.qcolor(theme.MUTED))

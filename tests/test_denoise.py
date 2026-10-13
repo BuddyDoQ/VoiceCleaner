@@ -126,3 +126,20 @@ def test_stages_handle_input_shorter_than_one_frame(speech):
     x = speech[int(3 * SR) : int(3 * SR) + 600]  # shorter than one STFT frame
     y = Dereverberator(SR, DereverbParams(reverb_reduction=0.5)).process(x)
     assert y.shape == x.shape and np.all(np.isfinite(y))
+
+
+# --- automatic profile from the noise before the first word -----------------------------------
+def test_leading_noise_region():
+    from app.audio.noise_profile import leading_noise_region
+
+    hop = 0.01
+    speech = np.zeros(500, bool)
+    speech[200:400] = True  # first word at 2.0 s
+    level = np.full(500, -60.0)
+    a, b = leading_noise_region(speech, level, hop)
+    assert a == 0.05 and abs(b - 1.85) < 1e-9
+    short = np.zeros(500, bool)
+    short[100:] = True  # first word at 1.0 s: less than a second after the margins
+    assert leading_noise_region(short, level, hop) is None
+    assert leading_noise_region(speech, np.full(500, -120.0), hop) is None  # digital silence
+    assert leading_noise_region(np.zeros(500, bool), level, hop) is None  # no speech at all

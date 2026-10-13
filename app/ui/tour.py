@@ -84,6 +84,18 @@ WHATS_NEW = [
          "A short tour of the basics, and after each update a quick look at what is new. Both are "
          "in the ⋯ menu any time.",
          target=lambda w: w.menu_btn, version="1.1.2"),
+    Step("Scrolling is safe now",
+         "The mouse wheel scrolls the settings, even over a slider or the preset box. To adjust a "
+         "control with the wheel, click it first: its knob turns blue.",
+         tab=0, target=lambda w: w.settings_panel.preset.parentWidget(), version="1.1.3"),
+    Step("Noise learned for you",
+         "When a recording starts with a second or more of background noise, VoiceCleaner learns "
+         "that noise when you open it and removes it more firmly. Clear Noise Profile undoes it.",
+         tab=0, version="1.1.3"),
+    Step("Easier-to-read text",
+         "VoiceCleaner now uses your system's fonts. Prefer the Steamburger Studios look? "
+         "⋯ menu → Appearance → Brand Fonts.",
+         target=lambda w: w.menu_btn, version="1.1.3"),
 ]
 
 

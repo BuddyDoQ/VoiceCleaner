@@ -112,7 +112,7 @@ def main() -> int:
     app.setApplicationName(APP_NAME)
     app.setStyle("Fusion")
     config = UserConfig.load()
-    theme.apply(app, config.extra.get("theme", "auto"))
+    theme.apply(app, config.extra.get("theme", "auto"), fonts=config.extra.get("fonts", "system"))
 
     class _FinderOpen(QObject):
         """macOS delivers files opened from Finder (double-click, drop on the Dock icon)

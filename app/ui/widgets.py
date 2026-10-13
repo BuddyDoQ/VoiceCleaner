@@ -334,3 +334,51 @@ class MetricsPanel(QFrame):
 
     def set_notes(self, notes: list[str]):
         self.notes.setText("\n".join(f"• {n}" for n in notes))
+
+
+class ThemeToggle(QPushButton):
+    """Round day/night switch, drawn with smooth (antialiased) shapes: a crescent moon in
+    night mode, a sun in day mode."""
+
+    SIZE = 34
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFlat(True)
+        self.setAttribute(Qt.WA_Hover)
+
+    def paintEvent(self, _e):
+        import math
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        hover = self.underMouse()
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        p.setPen(QPen(theme.qcolor(theme.ACCENT if hover else theme.BORDER_STRONG), 1.2))
+        p.setBrush(theme.qcolor(theme.SURFACE_2) if hover else Qt.NoBrush)
+        p.drawEllipse(r)
+        c = r.center()
+        ink = theme.qcolor(theme.ACCENT if hover else theme.TEXT)
+        p.setPen(Qt.NoPen)
+        p.setBrush(ink)
+        if theme.MODE == "night":  # crescent: a disc with an offset disc cut out
+            rad = r.width() * 0.22
+            moon = QPainterPath()
+            moon.addEllipse(c, rad, rad)
+            cut = QPainterPath()
+            cut.addEllipse(QPointF(c.x() + rad * 0.55, c.y() - rad * 0.45), rad * 0.85, rad * 0.85)
+            p.drawPath(moon.subtracted(cut))
+        else:  # sun: a disc and eight rays
+            rad = r.width() * 0.12
+            p.drawEllipse(c, rad, rad)
+            pen = QPen(ink, 1.6)
+            pen.setCapStyle(Qt.RoundCap)
+            p.setPen(pen)
+            for i in range(8):
+                a = i * math.pi / 4
+                p1 = QPointF(c.x() + math.cos(a) * rad * 1.75, c.y() + math.sin(a) * rad * 1.75)
+                p2 = QPointF(c.x() + math.cos(a) * rad * 2.6, c.y() + math.sin(a) * rad * 2.6)
+                p.drawLine(p1, p2)
+        p.end()

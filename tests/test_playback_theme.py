@@ -45,8 +45,13 @@ def test_theme_day_night_switch():
     assert theme.NIGHT["BG"] in theme.STYLESHEET
     assert theme.apply(app, "day") == "day"
     assert theme.BG != night_bg and theme.DAY["BG"] in theme.STYLESHEET
-    assert theme.FONT_DISPLAY == "Bebas Neue" and theme.FONT_UI == "Syne" and theme.FONT_MONO == "DM Mono"
-    theme.apply(app, "night")
+    # the brand fonts are bundled; the system fonts are the default, the brand ones on request
+    assert (theme.BRAND_DISPLAY, theme.BRAND_UI, theme.BRAND_MONO) == ("Bebas Neue", "Syne", "DM Mono")
+    assert theme.FONT_STYLE == "system" and theme.FONT_UI not in ("Syne", "Bebas Neue")
+    theme.apply(app, "day", fonts="brand")
+    assert (theme.FONT_DISPLAY, theme.FONT_UI, theme.FONT_MONO) == ("Bebas Neue", "Syne", "DM Mono")
+    theme.apply(app, "night", fonts="system")
+    assert theme.FONT_UI != "Syne" and "Bebas Neue" in theme.STYLESHEET  # the logo keeps the brand face
 
 
 def test_batch_export_uses_session_name(tmp_path, speech):

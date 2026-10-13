@@ -76,15 +76,19 @@ WARNING = ERROR = SUCCESS = RECORD = WAVE_ORIGINAL = WAVE_ENHANCED = PLAYHEAD = 
 MODE = "night"
 STYLESHEET = ""
 
+# The fonts in use: the system's (default, most readable in an app) or the Steamburger
+# Studios brand fonts. The logo wordmark and the splash always use the brand fonts.
+FONT_STYLE = "system"  # "system" | "brand"
 FONT_UI = "Syne"
 FONT_DISPLAY = "Bebas Neue"
 FONT_MONO = "DM Mono"
+BRAND_UI, BRAND_DISPLAY, BRAND_MONO = "Syne", "Bebas Neue", "DM Mono"
 _fonts_loaded = False
 
 
 def load_fonts() -> None:
     """Register the bundled brand fonts (SIL Open Font License)."""
-    global _fonts_loaded, FONT_UI, FONT_DISPLAY, FONT_MONO
+    global _fonts_loaded, BRAND_UI, BRAND_DISPLAY, BRAND_MONO
     if _fonts_loaded:
         return
     families = {}
@@ -93,13 +97,36 @@ def load_fonts() -> None:
         if fid >= 0:
             for fam in QFontDatabase.applicationFontFamilies(fid):
                 families[fam.lower()] = fam
-    FONT_UI = families.get("syne", "Segoe UI")
-    FONT_DISPLAY = families.get("bebas neue", "Impact")
-    FONT_MONO = families.get("dm mono", "Consolas")
+    BRAND_UI = families.get("syne", "Segoe UI")
+    BRAND_DISPLAY = families.get("bebas neue", "Impact")
+    BRAND_MONO = families.get("dm mono", "Consolas")
     _fonts_loaded = True
+    set_font_style(FONT_STYLE)
     import logging
 
-    logging.getLogger("VoiceCleaner.theme").info("Brand fonts: %s / %s / %s", FONT_DISPLAY, FONT_UI, FONT_MONO)
+    logging.getLogger("VoiceCleaner.theme").info("Brand fonts: %s / %s / %s", BRAND_DISPLAY, BRAND_UI, BRAND_MONO)
+
+
+def _system_fonts() -> tuple[str, str]:
+    """(text font, monospace font) of this system."""
+    ui = QFontDatabase.systemFont(QFontDatabase.GeneralFont).family()
+    available = set(QFontDatabase.families())
+    wanted = ("SF Mono", "Menlo") if sys.platform == "darwin" else ("Cascadia Mono", "Consolas")
+    mono = next((f for f in wanted if f in available), QFontDatabase.systemFont(QFontDatabase.FixedFont).family())
+    return ui, mono
+
+
+def set_font_style(style: str) -> None:
+    """Use the system fonts or the brand fonts (apply() restyles the app)."""
+    global FONT_STYLE, FONT_UI, FONT_DISPLAY, FONT_MONO
+    FONT_STYLE = "brand" if style == "brand" else "system"
+    if not _fonts_loaded:
+        return  # load_fonts() calls back once the brand fonts are registered
+    if FONT_STYLE == "brand":
+        FONT_UI, FONT_DISPLAY, FONT_MONO = BRAND_UI, BRAND_DISPLAY, BRAND_MONO
+    else:
+        ui, mono = _system_fonts()
+        FONT_UI, FONT_DISPLAY, FONT_MONO = ui, ui, mono
 
 
 def _set(values: dict) -> None:
@@ -184,14 +211,20 @@ def palette() -> QPalette:
 
 def build_stylesheet() -> str:
     mono = f"'{FONT_MONO}', Consolas, monospace"
-    disp = f"'{FONT_DISPLAY}', Impact, sans-serif"
+    brand_disp = f"'{BRAND_DISPLAY}', Impact, sans-serif"
+    if FONT_STYLE == "brand":
+        def heading(size):
+            return f"font-family: {brand_disp}; font-size: {size}pt; letter-spacing: 1px;"
+    else:  # the brand face is condensed: a wide system font needs less size, more weight
+        def heading(size):
+            return f"font-family: '{FONT_UI}'; font-size: {round(size * 0.7, 1)}pt; font-weight: 600;"
     return _scale_pt(f"""
 QWidget {{ color: {TEXT}; }}
 QMainWindow, QDialog {{ background: {BG}; }}
 QToolTip {{ background: {SURFACE}; color: {TEXT}; border: 1px solid {BORDER_STRONG}; padding: 6px; border-radius: 4px; }}
 
-QLabel[role="title"] {{ font-family: {disp}; font-size: 24pt; letter-spacing: 1px; }}
-QLabel[role="display"] {{ font-family: {disp}; font-size: 30pt; letter-spacing: 1px; }}
+QLabel[role="title"] {{ {heading(24)} }}
+QLabel[role="display"] {{ {heading(30)} }}
 QLabel[role="h2"] {{ font-size: 12pt; font-weight: 700; }}
 QLabel[role="section"] {{ color: {FAINT}; font-family: {mono}; font-size: 8pt; font-weight: 500; letter-spacing: 2px; }}
 QLabel[role="muted"] {{ color: {MUTED}; }}
@@ -199,6 +232,8 @@ QLabel[role="faint"] {{ color: {FAINT}; font-size: 8.5pt; }}
 QLabel[role="chip"] {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; border-radius: 4px; padding: 3px 9px; color: {MUTED}; font-family: {mono}; font-size: 8pt; }}
 QLabel[role="value"] {{ font-size: 11pt; font-weight: 700; }}
 QLabel[role="mono"] {{ font-family: {mono}; font-size: 10pt; }}
+QLabel[role="status"] {{ color: {MUTED}; font-family: {mono}; font-size: 8.5pt; background: transparent; padding: 0 2px; }}
+QLabel[role="meta"] {{ color: {FAINT}; font-family: {mono}; font-size: 8pt; background: transparent; }}
 QLabel[tone="accent"] {{ color: {ACCENT}; }}
 QLabel[tone="original"] {{ color: {ORIGINAL}; }}
 QLabel[tone="record"] {{ color: {RECORD}; }}
@@ -206,8 +241,8 @@ QLabel[tone="warning"] {{ color: {WARNING}; }}
 QLabel[tone="success"] {{ color: {SUCCESS}; }}
 QLabel[tone="faint"] {{ color: {FAINT}; }}
 QLabel[tone="muted"] {{ color: {MUTED}; }}
-QLabel[role="score"] {{ font-family: {disp}; font-size: 34pt; }}
-QLabel[role="brand"] {{ font-family: {disp}; font-size: 19pt; letter-spacing: 1px; }}
+QLabel[role="score"] {{ {heading(34)} }}
+QLabel[role="brand"] {{ font-family: {brand_disp}; font-size: 19pt; letter-spacing: 1px; }}
 QLabel[role="brandsub"] {{ font-family: {mono}; font-size: 7.5pt; color: {FAINT}; letter-spacing: 2px; }}
 QLabel[role="eqvalue"] {{ color: {FAINT}; font-family: {mono}; font-size: 7.5pt; }}
 QLabel[role="eqvalue"][active="true"] {{ color: {ACCENT}; }}
@@ -287,6 +322,8 @@ QSlider::groove:horizontal {{ height: 4px; background: {SURFACE_3}; border-radiu
 QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }}
 QSlider::handle:horizontal {{ background: {TEXT}; width: 16px; height: 16px; margin: -6px 0; border-radius: 8px; }}
 QSlider::handle:horizontal:hover {{ background: {ACCENT}; }}
+QSlider::handle:horizontal:focus {{ background: {ACCENT}; }}
+QSlider::handle:vertical:focus {{ background: {ACCENT}; }}
 QSlider::sub-page:horizontal:disabled {{ background: {BORDER_STRONG}; }}
 QSlider::handle:horizontal:disabled {{ background: {FAINT}; }}
 QSlider[role="small"]::handle:horizontal {{ width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; }}
@@ -311,10 +348,11 @@ QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
 QScrollBar::handle:horizontal {{ background: {SURFACE_3}; border-radius: 4px; min-width: 30px; }}
 
 QTabWidget::pane {{ border: none; }}
-QTabBar::tab {{ background: {SURFACE_2}; color: {MUTED}; padding: 8px 20px; margin: 8px 6px 0 0; border: 1px solid {BORDER_STRONG}; border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; font-family: {mono}; font-size: 8.5pt; letter-spacing: 2px; }}
+QTabBar::tab {{ background: {SURFACE_2}; color: {MUTED}; padding: 7px 20px; margin: 10px 6px 0 0; border: 1px solid {BORDER}; border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; font-family: {mono}; font-size: 8.5pt; letter-spacing: 2px; }}
 QTabBar::tab:hover {{ background: {SURFACE_3}; color: {TEXT}; }}
-QTabBar::tab:selected {{ background: {ACCENT}; color: {ACCENT_TEXT}; border-color: {ACCENT}; }}
-QTabBar {{ border-bottom: 2px solid {ACCENT}; }}
+/* the selected tab is part of the page: page colour, no line under it, taller, accent edge on top */
+QTabBar::tab:selected {{ background: {BG}; color: {ACCENT}; border: 1px solid {BORDER_STRONG}; border-top: 3px solid {ACCENT}; border-bottom: none; margin-top: 4px; margin-bottom: -1px; padding: 9px 20px 9px 20px; }}
+QTabBar {{ border-bottom: 1px solid {BORDER_STRONG}; }}
 
 QTableWidget, QTreeWidget, QListWidget {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 8px; gridline-color: transparent; selection-background-color: {SURFACE_3}; selection-color: {TEXT}; alternate-background-color: {BG_ALT}; }}
 QTableWidget::item, QTreeWidget::item {{ padding: 4px; border-bottom: 1px solid {BORDER}; }}
@@ -345,9 +383,12 @@ def resolve_mode(preference: str) -> str:
     return "night"
 
 
-def apply(app, preference: str = "auto") -> str:
-    """Switch every colour and restyle the running application. Returns the mode used."""
+def apply(app, preference: str = "auto", fonts: str | None = None) -> str:
+    """Switch every colour (and the fonts, when ``fonts`` is "system" or "brand") and
+    restyle the running application. Returns the mode used."""
     global MODE, STYLESHEET
+    if fonts is not None:
+        set_font_style(fonts)
     load_fonts()
     MODE = resolve_mode(preference)
     _set(DAY if MODE == "day" else NIGHT)

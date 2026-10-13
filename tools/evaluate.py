@@ -8,7 +8,9 @@ runs the pipeline and reports, before -> after:
 
 Both are computed at 16 kHz against the clean reference speech.
 
-Usage:  python tools/evaluate.py [--preset "Clean Voice"] [--device auto|cpu|cuda] [--no-ai]
+Usage:  python tools/evaluate.py [--preset "Clean Voice"] [--device auto|cpu|cuda] [--no-ai] [--learn]
+
+--learn learns the noise profile from the longest pause of each file, like Learn Noise Profile.
 """
 from __future__ import annotations
 
@@ -76,6 +78,7 @@ def main():
     ap.add_argument("--device", default="auto")
     ap.add_argument("--no-ai", action="store_true")
     ap.add_argument("--save", action="store_true", help="write outputs to test_audio/out")
+    ap.add_argument("--learn", action="store_true", help="learn the noise from the longest pause")
     args = ap.parse_args()
     setup_logging(logging.WARNING)
 
@@ -92,7 +95,15 @@ def main():
         settings = auto_configure(args.preset, analysis).settings
         if args.no_ai:
             settings.use_ai = False
-        result = pipe.run(audio, analysis, settings)
+        learned = None
+        if args.learn and analysis.silence_regions:
+            from app.audio import noise_profile
+
+            a, b = max(analysis.silence_regions, key=lambda r: r[1] - r[0])
+            mono = np.asarray(audio.samples).mean(axis=1)
+            learned = noise_profile.estimate(mono, audio.sample_rate, [(a, min(b, a + 2.0))], source="learned",
+                                             margin_s=0.0)
+        result = pipe.run(audio, analysis, settings, learned_profile=learned)
         if args.save:
             out = test_dir / "out"
             out.mkdir(exist_ok=True)

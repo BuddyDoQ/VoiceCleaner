@@ -357,8 +357,14 @@ class EnhancementPipeline:
 
         # 3. profile denoiser
         dsp_atten = 0.0
-        if s.noise_reduction > 0.01 and profile is not None and (profile.reliable or not ai_possible):
-            if ai_possible:
+        learned_used = profile is not None and profile.source == "learned"
+        if s.noise_reduction > 0.01 and profile is not None and (profile.reliable or not ai_possible or learned_used):
+            if ai_possible and learned_used:
+                # the user showed exactly what the noise is: trust it, remove it more firmly,
+                # and leave the AI its full range for everything else
+                dsp_atten = min(18.0, s.max_attenuation_db * 0.7)
+                strength = 1.0
+            elif ai_possible:
                 # the AI model does the heavy lifting; DSP takes the edge off steady noise first
                 dsp_atten = min(12.0, s.max_attenuation_db * 0.5)
                 strength = min(1.0, 0.4 + 0.6 * s.noise_reduction)
@@ -371,7 +377,7 @@ class EnhancementPipeline:
             process_in_chunks(cur, lambda c: self._checked(prog, den.process, c), chunk, overlap, out=spare,
                               progress=lambda f: prog("denoise", f, "Reducing background noise..."))
             cur, spare = spare, cur
-            info["stages"].append("profile denoise")
+            info["stages"].append("profile denoise (learned noise)" if learned_used else "profile denoise")
         prog("denoise", 1.0, "Reducing background noise...")
 
         # 4. AI enhancement
@@ -380,7 +386,8 @@ class EnhancementPipeline:
                 from ..ai.inference import ModelInference
 
                 inference = ModelInference(self.model_manager, self.chunk_seconds, self.overlap_seconds)
-                max_att = max(3.0, s.max_attenuation_db - dsp_atten)
+                # a learned profile's reduction comes on top: the AI keeps its full range
+                max_att = s.max_attenuation_db if learned_used else max(3.0, s.max_attenuation_db - dsp_atten)
                 enh = SpeechEnhancer(inference, SpeechEnhancerParams(s.noise_reduction, max_att))
                 prog("ai", 0.0, "Enhancing speech...")
                 enh.process(cur, sr, spare, progress=lambda f: prog("ai", f, "Enhancing speech..."),

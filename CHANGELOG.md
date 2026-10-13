@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.3
+
+- **Noise learned automatically.** When a recording starts with at least a second of
+  background noise before the first word, VoiceCleaner learns that noise when the recording
+  opens (shown on the waveform; *Clear Noise Profile* undoes it).
+- **A learned noise profile now makes a real difference.** VoiceCleaner trusts a profile you
+  (or the automatic lead-in) provide: steady noise is removed more firmly and the AI keeps
+  its full range, about 4-8 dB less background noise in pauses. It also works on recordings
+  without clear pauses.
+- **Scrolling never changes a setting.** The mouse wheel scrolls the settings, even over a
+  slider, the preset box or a number box. Click a control first to adjust it with the wheel
+  (its knob turns blue).
+- **System fonts by default** for easier reading; the Steamburger Studios fonts are one click
+  away (⋯ menu → Appearance → Brand Fonts). The logo keeps its brand face.
+- **Cleaner look:** the file's details sit in one quiet line under its name; the processor and
+  AI model in the header are plain text, not buttons; a smooth day/night button; the selected
+  tab now sits in front, joined to its page.
+- **Fixed:** learning or clearing a noise profile could push the playback row off the side of
+  the window or onto a second line; the selection stayed visible on the Enhanced waveform
+  after learning, and learning again then asked for a selection.
+
 ## 1.1.2
 
 - **Getting Started tour.** The first start of a new install walks through the basics, one

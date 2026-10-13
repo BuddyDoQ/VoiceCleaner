@@ -90,3 +90,28 @@ def _octave_bands(power: np.ndarray) -> np.ndarray:
     n = power.shape[0]
     edges = np.unique(np.clip(np.round(np.geomspace(2, n, 12)).astype(int), 1, n))
     return np.stack([power[a:b].mean(axis=0) for a, b in zip(edges[:-1], edges[1:]) if b > a])
+
+
+# --- background noise before the first word ------------------------------------------------
+LEAD_MIN_S = 1.0  # at least this much noise-only audio at the start
+LEAD_SKIP_S = 0.05  # skip the very first frames (a click when recording starts)
+LEAD_MARGIN_S = 0.15  # stop this long before the first word: no breath or onset in the profile
+DIGITAL_SILENCE_DB = -90.0
+
+
+def leading_noise_region(speech_mask: np.ndarray, frame_level_db: np.ndarray, hop_s: float,
+                         min_s: float = LEAD_MIN_S) -> tuple[float, float] | None:
+    """The background-only stretch before the first word, when there is at least ``min_s``
+    of it (after a small margin on both sides) and it holds real noise, not digital silence.
+    Recordings with no speech at all return None."""
+    if speech_mask.size == 0 or not speech_mask.any():
+        return None
+    first = int(np.argmax(speech_mask))
+    a, b = LEAD_SKIP_S, first * hop_s - LEAD_MARGIN_S
+    if b - a < min_s:
+        return None
+    i0, i1 = int(a / hop_s), int(b / hop_s)
+    levels = frame_level_db[i0:i1]
+    if levels.size == 0 or np.median(levels) < DIGITAL_SILENCE_DB:
+        return None  # nothing to learn from silence
+    return (round(a, 3), round(b, 3))

@@ -211,11 +211,17 @@ The guiding rule is *better speech, not obviously processed speech*.
   * *Compression* (amount, threshold, ratio, attack, release) controls word-level peaks.
   * *De-esser* (50% by default) softens harsh "s", "sh" and "t" sounds only at the
     moments they stick out, so the voice stays bright without sounding sharp.
+* **Scrolling:** the mouse wheel scrolls the settings, even over a slider or the preset box.
+  Click a control first to adjust it with the wheel.
+* **Fonts:** system fonts by default; *Appearance → Brand Fonts* in the ⋯ menu switches to
+  the Steamburger Studios fonts.
 * **Advanced:** noise floor bias, spectral subtraction strength, noise gate, residual
   noise floor, presence, clarity, low-end cleanup, reverb/echo, target loudness and
   peak ceiling.
 * **Learn Noise Profile:** drag across a background-only part of either waveform, then
-  click *Learn Noise Profile*.
+  click *Learn Noise Profile*. A learned profile is trusted: that noise is removed more
+  firmly. When a recording starts with a second or more of background noise before the
+  first word, it is learned automatically on opening (*Clear Noise Profile* undoes it).
 * **A/B:** press `A` / `B` (or the buttons) during playback; the switch is instant and
   click-free at the same position. *Equal-loudness comparison* plays the original at
   the enhanced loudness so you judge quality, not volume.

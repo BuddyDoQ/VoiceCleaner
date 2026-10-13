@@ -352,7 +352,9 @@ QTabBar::tab {{ background: {SURFACE_2}; color: {MUTED}; padding: 7px 20px; marg
 QTabBar::tab:hover {{ background: {SURFACE_3}; color: {TEXT}; }}
 /* the selected tab is part of the page: page colour, no line under it, taller, accent edge on top */
 QTabBar::tab:selected {{ background: {BG}; color: {ACCENT}; border: 1px solid {BORDER_STRONG}; border-top: 3px solid {ACCENT}; border-bottom: none; margin-top: 4px; margin-bottom: -1px; padding: 9px 20px 9px 20px; }}
-QTabBar {{ border-bottom: 1px solid {BORDER_STRONG}; }}
+/* the bar measures each tab with its own font: give it the tabs' font and spacing, or a wider
+   monospace face (system fonts: SF Mono / Menlo) is cut short ("ENHAN...") */
+QTabBar {{ border-bottom: 1px solid {BORDER_STRONG}; font-family: {mono}; font-size: 8.5pt; letter-spacing: 2px; }}
 
 QTableWidget, QTreeWidget, QListWidget {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 8px; gridline-color: transparent; selection-background-color: {SURFACE_3}; selection-color: {TEXT}; alternate-background-color: {BG_ALT}; }}
 QTableWidget::item, QTreeWidget::item {{ padding: 4px; border-bottom: 1px solid {BORDER}; }}

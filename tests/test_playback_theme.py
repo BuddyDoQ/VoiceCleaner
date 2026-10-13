@@ -86,3 +86,34 @@ def test_playhead_stands_out_in_both_themes():
     for palette in (theme.DAY, theme.NIGHT):
         for bg in (palette["SURFACE"], palette["BG"]):
             assert _contrast(palette["PLAYHEAD"], bg) >= 4.5, (palette["PLAYHEAD"], bg)
+
+
+@pytest.mark.parametrize("fonts", ["system", "brand"])
+def test_tab_labels_are_never_cut_short(fonts):
+    """The tab bar measures its tabs with its own font; it must be the font the tabs are drawn
+    in, or a wider monospace face is cut to "ENHAN..." (seen with system fonts on macOS)."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    import shiboken6
+    from PySide6.QtWidgets import QApplication, QTabWidget, QWidget
+
+    from app.ui import theme
+
+    app = QApplication.instance() or QApplication([])
+    theme.apply(app, "day", fonts=fonts)
+    tabs = QTabWidget()
+    try:
+        tabs.setDocumentMode(True)
+        for name in ("ENHANCE", "PLAYBACK", "COMPILE", "BATCH"):
+            tabs.addTab(QWidget(), name)
+        tabs.resize(1200, 300)
+        tabs.show()
+        app.processEvents()
+        bar = tabs.tabBar()
+        assert bar.font().letterSpacing() == 2.0 and bar.font().family() == theme.FONT_MONO
+        for i in range(bar.count()):
+            assert bar.tabRect(i).width() >= bar.fontMetrics().horizontalAdvance(bar.tabText(i)) + 30, bar.tabText(i)
+    finally:
+        shiboken6.delete(tabs)
+        theme.apply(app, "night", fonts="system")

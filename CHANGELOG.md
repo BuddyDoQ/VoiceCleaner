@@ -20,6 +20,8 @@
 - **Fixed:** learning or clearing a noise profile could push the playback row off the side of
   the window or onto a second line; the selection stayed visible on the Enhanced waveform
   after learning, and learning again then asked for a selection.
+- **Fixed:** with system fonts the first tab read "ENHAN..." (the tab bar measured its tabs
+  in a different font from the one they are drawn in).
 
 ## 1.1.2
 

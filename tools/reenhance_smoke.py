@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 # isolate: never read or write the real user's preferences or Documents folder
 os.environ["APPDATA"] = tempfile.mkdtemp(prefix="vc_appdata_")
 os.environ["USERPROFILE"] = tempfile.mkdtemp(prefix="vc_profile_")
+os.environ["HOME"] = os.environ["USERPROFILE"]  # macOS keeps settings under HOME (~/Library), not APPDATA
 os.environ["VOICECLEANER_NO_UPDATE_CHECK"] = "1"
 os.environ["VOICECLEANER_NO_TOUR"] = "1"  # the Getting Started tour would cover the window
 

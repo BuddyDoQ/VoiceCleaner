@@ -8,7 +8,8 @@
   is new since the version you used before, and nothing when there is nothing new. Both
   are in the ⋯ menu any time (*Getting Started*, *What's New*).
 - The voice re-synthesis model stays where it was downloaded
-  (`%LOCALAPPDATA%\VoiceCleaner\models`) through updates; it is only downloaded again
+  (`%LOCALAPPDATA%\VoiceCleaner\models`, on a Mac `~/Library/Application Support/VoiceCleaner/models`)
+  through updates; it is only downloaded again
   when the model itself changes.
 
 ## 1.1.1

@@ -17,6 +17,7 @@ from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
+from ..utils.shell import BACKSPACE_NAME
 from . import theme
 
 # settings saved by versions before the tour existed count as this version
@@ -58,7 +59,7 @@ BASICS = [
          "one for each episode or project.",
          target=lambda w: w.session_btn),
     Step("Teleprompter",
-         "Read a script while VoiceCleaner records: one take per section, retakes with Backspace. "
+         f"Read a script while VoiceCleaner records: one take per section, retakes with {BACKSPACE_NAME}. "
          "The takes are enhanced and appear in Compile in script order.",
          target=lambda w: w.prompter_btn),
     Step("Playback",

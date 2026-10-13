@@ -245,6 +245,9 @@ The guiding rule is *better speech, not obviously processed speech*.
   `Ctrl+Enter` enhance, `Ctrl+E` export, `R` record/stop, `Ctrl+Shift+N` new session,
   `Esc` cancel. `Space` plays whichever tab is in front (Enhance or Playback). `Ctrl+wheel` zooms the waveform.
   The menu's *Keyboard Shortcuts* (`Ctrl+/`) lists them all.
+* **Getting Started:** the first start of a new install takes a short tour of the basics,
+  one stop per tab. After an update, only what is new is shown. The ⋯ menu has both
+  (*Getting Started*, *What's New*).
 * **Open Recent** (app menu): the last ten recordings you opened. The start screen lists
   the last five for one-click access, and next to them, under *THIS SESSION*, the
   session's five newest recordings. VoiceCleaner reopens on the tab you used last.

@@ -18,6 +18,7 @@ _os.environ["APPDATA"] = _tempfile.mkdtemp(prefix="vc_appdata_")
 _os.environ["USERPROFILE"] = _tempfile.mkdtemp(prefix="vc_profile_")
 _os.environ["HOME"] = _os.environ["USERPROFILE"]
 _os.environ["VOICECLEANER_NO_UPDATE_CHECK"] = "1"
+_os.environ["VOICECLEANER_NO_TOUR"] = "1"  # the Getting Started tour would cover the window
 
 from PySide6.QtCore import QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402

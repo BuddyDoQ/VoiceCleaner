@@ -26,6 +26,7 @@ for var in ("APPDATA", "LOCALAPPDATA", "USERPROFILE"):
     os.environ[var] = tempfile.mkdtemp(prefix=f"vc_shots_{var.lower()}_")
 os.environ["HOME"] = os.environ["USERPROFILE"]
 os.environ["VOICECLEANER_NO_UPDATE_CHECK"] = "1"
+os.environ["VOICECLEANER_NO_TOUR"] = "1"  # the Getting Started tour would cover the window
 
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402

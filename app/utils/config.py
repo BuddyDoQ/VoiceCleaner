@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 APP_NAME = "VoiceCleaner"
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 
 
 def app_root() -> Path:
@@ -110,6 +110,7 @@ class UserConfig:
     advanced_open: bool = False
     batch_output_dir: str = ""
     extra: dict = field(default_factory=dict)
+    existed = False  # not a field: True when loaded from a saved file (not a new install)
 
     @classmethod
     def path(cls) -> Path:
@@ -123,6 +124,7 @@ class UserConfig:
             return cls()
         known = {f.name for f in fields(cls)}
         cfg = cls()
+        cfg.existed = True
         for key, value in data.items():
             if key in known:
                 expected = type(getattr(cfg, key))

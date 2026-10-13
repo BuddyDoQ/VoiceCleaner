@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.2
+
+- **Getting Started tour.** The first start of a new install walks through the basics, one
+  stop per tab: the window dims around each control and a short note explains it (Back,
+  Next, Skip; arrow keys and Esc work too). After an update, VoiceCleaner shows only what
+  is new since the version you used before, and nothing when there is nothing new. Both
+  are in the ⋯ menu any time (*Getting Started*, *What's New*).
+- The voice re-synthesis model stays where it was downloaded
+  (`%LOCALAPPDATA%\VoiceCleaner\models`) through updates; it is only downloaded again
+  when the model itself changes.
+
 ## 1.1.1
 
 - **A warmer, smoother default sound.** The automatic voice EQ no longer thins the low end

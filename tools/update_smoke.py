@@ -21,6 +21,7 @@ os.environ["LOCALAPPDATA"] = tempfile.mkdtemp(prefix="vc_local_")
 os.environ["USERPROFILE"] = tempfile.mkdtemp(prefix="vc_profile_")
 os.environ["HOME"] = os.environ["USERPROFILE"]
 os.environ["VOICECLEANER_NO_UPDATE_CHECK"] = "1"  # the check is started by hand below
+os.environ["VOICECLEANER_NO_TOUR"] = "1"  # the Getting Started tour would cover the window
 
 PAYLOAD = os.urandom(3_000_000)
 FILES = {}

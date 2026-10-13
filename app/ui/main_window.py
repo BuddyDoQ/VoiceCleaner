@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
         self._exported_result = None  # the enhanced result last exported (to warn before discarding others)
         self._after_export = None  # runs after the Enhance tab's export succeeds (e.g. switch session)
         self._compile_link = None  # (recording, enhanced file, Compile row) when opened from Compile
+        self._tour = None  # the Getting Started / What's New overlay, while shown
         self._preview_task = None
         self._preview_gen = 0
         self._export_after_enhance = None  # what to finish once "Enhance Again" is done (export / update)
@@ -262,6 +263,7 @@ class MainWindow(QMainWindow):
         menu_btn.setPopupMode(QToolButton.InstantPopup)
         menu_btn.setMenu(self._build_menu())
         lay.addWidget(menu_btn)
+        self.menu_btn = menu_btn
         return bar
 
     def _build_session_menu(self) -> QMenu:
@@ -308,6 +310,8 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction("Teleprompter\u2026", self.open_teleprompter, QKeySequence("Ctrl+T"))
         m.addSeparator()
+        m.addAction("Getting Started", lambda: self.start_tour("basics"))
+        m.addAction("What's New", lambda: self.start_tour("news"))
         m.addAction("Keyboard Shortcuts", self._show_shortcuts, QKeySequence("Ctrl+/"))
         m.addAction("Show Tips Again", self._show_tips)
         m.addAction("Open Log Folder", lambda: self._open_folder(log_dir()))
@@ -2223,6 +2227,58 @@ class MainWindow(QMainWindow):
     def _show_tips(self):
         self.config.extra["smart_note_hidden"] = False
         self.settings_panel.show_tips()
+
+    # ============================================================================ tour
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not getattr(self, "_tour_checked", False):
+            self._tour_checked = True
+            QTimer.singleShot(900, self._tour_on_start)
+
+    def _tour_on_start(self):
+        """First start of a new install: the basics. First start after an update: what is
+        new since the version last seen (nothing when there is nothing new)."""
+        from . import tour
+
+        if os.environ.get("VOICECLEANER_NO_TOUR"):
+            return
+        seen = self.config.extra.get("tour_seen_version")
+        if seen == APP_VERSION:
+            return
+        fresh = not self.config.existed and seen is None
+        steps = tour.steps_on_start(fresh, seen)
+        if not steps:
+            self._tour_done()
+            return
+        self.start_tour("basics" if fresh else "news", steps)
+
+    def start_tour(self, kind: str, steps=None):
+        from . import tour
+
+        if getattr(self, "_tour", None) is not None:
+            return
+        steps = steps or (list(tour.BASICS) if kind == "basics" else tour.latest_news())
+        if not steps:
+            return
+        heading = "GETTING STARTED" if kind == "basics" else f"WHAT'S NEW IN {APP_VERSION}"
+        self._tour = tour.TourOverlay(self, steps, heading)
+        self._tour.finished.connect(self._tour_done)
+        # the window's single-key shortcuts (Space, R, A/B, Esc...) would act behind the tour
+        self._tour_paused = [sc for sc in self.findChildren(QShortcut) if sc.isEnabled()]
+        for sc in self._tour_paused:
+            sc.setEnabled(False)
+        self._tour.start()
+
+    def _tour_done(self):
+        self._tour = None
+        for sc in getattr(self, "_tour_paused", []):
+            sc.setEnabled(True)
+        self._tour_paused = []
+        self.config.extra["tour_seen_version"] = APP_VERSION
+        try:
+            self.config.save()
+        except OSError:
+            pass
 
     def _show_shortcuts(self):
         rows = "".join(f"<tr><td style='padding:3px 18px 3px 0'><b>{shortcut_text(k)}</b></td><td>{v}</td></tr>"

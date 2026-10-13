@@ -16,6 +16,7 @@ os.environ["APPDATA"] = tempfile.mkdtemp(prefix="vc_appdata_")
 os.environ["USERPROFILE"] = tempfile.mkdtemp(prefix="vc_profile_")
 os.environ["HOME"] = os.environ["USERPROFILE"]
 os.environ["VOICECLEANER_NO_UPDATE_CHECK"] = "1"
+os.environ["VOICECLEANER_NO_TOUR"] = "1"  # the Getting Started tour would cover the window
 
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402

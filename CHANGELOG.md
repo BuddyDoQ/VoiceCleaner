@@ -29,6 +29,9 @@
 - **Fixed:** the installer's side panel showed the VoiceCleaner name cut off (1.1.3).
 - **README:** download links and what VoiceCleaner does come first; building from source
   moved to `BUILDING.md`.
+- **Mac:** the same formats open on a Mac. Its FFmpeg is compiled from the same source as the
+  Windows one (LGPL, no external libraries); on a Mac, `VoiceCleaner.app/Contents/MacOS/VoiceCleaner
+  --batch ...` is the command line.
 
 ## 1.1.3
 

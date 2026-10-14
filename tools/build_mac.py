@@ -71,6 +71,10 @@ def build(python: Path, skip_tests: bool) -> Path:
         "--distpath", APP.parent, "--workpath", ROOT / "build" / "pyi-mac", "VoiceCleaner.spec")
     shutil.rmtree(APP.parent / "VoiceCleaner", ignore_errors=True)  # one-folder copy, already inside the .app
     shutil.copy2(build_helper(), APP / "Contents" / "MacOS" / HELPER_OUT.name)  # signed with the app below
+    from build_ffmpeg_mac import install as install_ffmpeg
+
+    ffmpeg_dir = APP / "Contents" / "Resources" / "ffmpeg"  # app_root()/ffmpeg: where decode.py looks
+    install_ffmpeg(ffmpeg_dir)  # LGPL, built from the source attached to the release; signed below
 
     res = APP / "Contents" / "Resources"
     models_out = res / "models"
@@ -90,6 +94,8 @@ def build(python: Path, skip_tests: bool) -> Path:
     shutil.copy(ROOT / "app" / "ai" / "vendor" / "bigvgan" / "LICENSE", lic / "BigVGAN-LICENSE.txt")
     for f in (ROOT / "app" / "ui" / "assets" / "fonts").glob("*-OFL.txt"):
         shutil.copy(f, lic / f.name)
+    shutil.copy(ffmpeg_dir / "LICENSE.txt", lic / "FFmpeg-LICENSE.txt")
+    shutil.copy(ffmpeg_dir / "README.txt", lic / "FFmpeg-README.txt")
     return APP
 
 
@@ -155,6 +161,10 @@ feature is used; everything else works offline.
 macOS asks once for *System Audio Recording* permission). On older macOS, install a loopback
 driver such as BlackHole; it is then listed under Desktop audio. Microphone recording works
 on every version; macOS asks for permission the first time.
+
+**Opens more than WAV:** M4A voice memos, AAC, MP3, FLAC, Opus/OGG, AIFF, WMA, AMR and the
+sound of videos (MP4, MOV, MKV, WebM, AVI). Formats beyond WAV/FLAC/MP3/OGG/AIFF are decoded by
+an LGPL build of FFmpeg inside the app, compiled from the source attached to this release.
 
 Files: preferences in `~/Library/Application Support/VoiceCleaner`, logs in
 `~/Library/Logs/VoiceCleaner`, sessions in `~/Documents/VoiceCleaner Sessions`.

@@ -13,7 +13,7 @@ its own license; full license texts are included in the respective packages insi
 | Qt 6 / PySide6 | user interface | LGPL-3.0 (dynamically linked) |
 | NumPy, SciPy | signal processing | BSD-3-Clause |
 | libsndfile / soundfile | WAV and MP3 file I/O | LGPL-2.1 / BSD-3-Clause |
-| FFmpeg (LGPL build by BtbN/FFmpeg-Builds, Windows; run as a separate program, `ffmpeg/`) | opening M4A, AAC, WMA and video files | LGPL-3.0; source code attached to each release (`ffmpeg-source-*.tar.gz`) |
+| FFmpeg (LGPL build by BtbN/FFmpeg-Builds on Windows; on macOS built from the same source by `tools/build_ffmpeg_mac.py`, LGPL-2.1, no external libraries; run as a separate program, `ffmpeg/`) | opening M4A, AAC, WMA and video files | LGPL; source code attached to each release (`ffmpeg-source-*.tar.gz`) |
 | LAME (inside libsndfile) | MP3 encoding | LGPL-2.0 |
 | PortAudio / sounddevice | audio playback | MIT |
 | psutil | memory detection | BSD-3-Clause |

@@ -56,7 +56,11 @@ def main():
     subprocess.run(q + ["-i", str(SRC), "-c:a", "aac", "-b:a", "96k", str(media / "Voice Memo 14.m4a")], check=True)
     subprocess.run(q + ["-f", "lavfi", "-i", "color=c=navy:s=320x240:r=15", "-i", str(SRC), "-shortest",
                         "-c:v", "mpeg4", "-c:a", "aac", str(media / "zoom_0.mp4")], check=True)
-    subprocess.run(q + ["-i", str(SRC), "-c:a", "libmp3lame", str(media / "interview.mp3")], check=True)
+    try:
+        subprocess.run(q + ["-i", str(SRC), "-c:a", "libmp3lame", str(media / "interview.mp3")], check=True)
+    except subprocess.CalledProcessError:  # the Mac FFmpeg has no external encoders: libsndfile writes MP3
+        data, sr = sf.read(str(SRC), dtype="float32")
+        sf.write(str(media / "interview.mp3"), data, sr, format="MP3")
 
     setup_logging()
     app = QApplication(sys.argv)

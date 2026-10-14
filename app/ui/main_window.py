@@ -72,7 +72,7 @@ SHORTCUTS = [
     ("Ctrl+/", "This list"),
     ("Ctrl+mouse wheel", "Zoom the waveform"),
     ("Double-click a slider", "Reset it to the preset's value"),
-    ("E (Compile)", "Edit the selected take: X cut, S silence, Ctrl+Z undo"),
+    ("E (Compile)", f"Edit the selected take: X cut, S silence, {shortcut_text('Ctrl+Z')} undo"),
     ("P (Batch)", "Preview on/off: a sample of the selected file; Space plays it, A / B compare"),
 ]
 

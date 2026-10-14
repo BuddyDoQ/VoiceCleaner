@@ -4,7 +4,7 @@
           --> noise profile --> profile denoiser (steady noise)
           --> AI speech enhancement (DeepFilterNet3)
           --> de-reverb / echo reduction --> adaptive voice EQ      [restoration]
-          --> pre-gain --> compressor --> expander
+          --> pre-gain --> compressor --> expander --> pause clean-up
           --> loudness normalisation --> true-peak limiter         [mastering]
           --> quality control (may reprocess with gentler settings)
 
@@ -35,6 +35,7 @@ from .leveler import Leveler, LevelerParams
 from .limiter import LimiterParams, TruePeakLimiter
 from .loader import AudioData, allocate
 from .noise_profile import NoiseProfile
+from .pause_cleanup import PauseCleaner, PauseCleanupParams
 from .settings import ProcessingSettings
 from .speech_enhancer import SpeechEnhancer, SpeechEnhancerParams
 from ..utils.errors import ModelUnavailableError
@@ -493,9 +494,10 @@ class EnhancementPipeline:
         mono = x[:, 0] if x.shape[1] == 1 else x.mean(axis=1)
         if learned is not None:
             # re-measure the learned region on the filtered signal so the profile matches what the denoiser sees
+            # (no extra margin: a selection or an automatic lead-in already keeps clear of speech)
             regions = learned.regions
             if regions:
-                p = noise_profile_mod.estimate(mono, sr, regions, source="learned")
+                p = noise_profile_mod.estimate(mono, sr, regions, source="learned", margin_s=0.0)
                 if p is not None:
                     return p
             return learned
@@ -559,6 +561,8 @@ class EnhancementPipeline:
         DeEsser(sr, DeEsserParams(amount=s.deesser)).process(y, out=y)
         prog("dynamics", 0.7, "Balancing levels...")
         NoiseGate(sr, GateParams(threshold_db=s.noise_gate_db)).process(y, out=y)
+        # what the AI left after phrases (and the compressor lifted) comes down to an even room tone
+        PauseCleaner(sr, PauseCleanupParams(amount=s.pause_cleanup)).process(y, analysis.speech_mask, FRAME_HOP_S, out=y)
         prog("dynamics", 1.0, "Balancing levels...")
         prog.check()
 

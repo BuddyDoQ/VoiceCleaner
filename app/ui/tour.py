@@ -89,7 +89,7 @@ WHATS_NEW = [
          "control with the wheel, click it first: its knob turns blue.",
          tab=0, target=lambda w: w.settings_panel.preset.parentWidget(), version="1.1.3"),
     Step("Noise learned for you",
-         "When a recording starts with a second or more of background noise, VoiceCleaner learns "
+         "When a recording starts with background noise before the first word, VoiceCleaner learns "
          "that noise when you open it and removes it more firmly. Clear Noise Profile undoes it.",
          tab=0, version="1.1.3"),
     Step("Easier-to-read text",
@@ -112,6 +112,14 @@ WHATS_NEW = [
          "Record has two new options: a 3-second countdown, and one quiet second recorded "
          "first, which VoiceCleaner uses to measure your room's background noise.",
          tab=0, version="1.1.4"),
+    Step("Quieter pauses",
+         "The background left between phrases and at the end of a recording is now turned down "
+         "to an even, quiet room tone. Advanced → Pause clean-up sets how far.",
+         tab=0, version="1.1.5"),
+    Step("Shorter noise samples",
+         "A third of a second of steady noise before the first word is now enough for VoiceCleaner "
+         "to learn your background noise, so short takes get cleaned more firmly too.",
+         tab=0, version="1.1.5"),
 ]
 
 

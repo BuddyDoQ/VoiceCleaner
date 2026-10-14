@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QInput
                                QMessageBox, QPushButton, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget)
 
 from ..audio.analyzer import AnalysisResult
-from ..audio.eq import VoiceEQParams, choose_highpass, manual_bands
+from ..audio.eq import VoiceEQParams, choose_highpass, heavy_eq_warning, manual_bands
 from ..audio.settings import (DEFAULT_PRESET, PRESETS, SMART_FIELDS, ProcessingSettings, apply_simple,
                               is_user_preset, modified_fields, preset_names, preset_reference, smart_adapt)
 from ..utils import user_presets
@@ -330,6 +330,9 @@ class SettingsPanel(QWidget):
                   "Gently turns down passages quieter than this level (soft expander, never full silence).")
         self._adv(g, "max_attenuation_db", "Residual noise floor", 6, 60, 1, lambda v: f"−{v:.0f} dB",
                   "The deepest the background may be reduced. Keeping some room tone sounds more natural.")
+        self._adv(g, "pause_cleanup", "Pause clean-up", 0, 1, 0.01, pct,
+                  "Turns down the background left between phrases and at the end of the recording,\n"
+                  "to an even, quiet room tone (never full silence). Speech is not touched.")
 
         g = self._group(adv, "Speech enhancement")
         self._adv(g, "speech_enhancement", "Enhancement strength", 0, 1, 0.01, pct,
@@ -417,6 +420,12 @@ class SettingsPanel(QWidget):
         self.graphic_eq = GraphicEQ()
         self.graphic_eq.changed.connect(self._eq_changed)
         b.addWidget(self.graphic_eq)
+        self.eq_warning = QLabel()
+        self.eq_warning.setWordWrap(True)
+        self.eq_warning.setProperty("role", "faint")
+        self.eq_warning.setProperty("tone", "warning")
+        self.eq_warning.hide()
+        b.addWidget(self.eq_warning)
         reset = QPushButton("Reset EQ")
         reset.setProperty("role", "ghost")
         reset.clicked.connect(self._reset_eq)
@@ -487,7 +496,11 @@ class SettingsPanel(QWidget):
 
     def _update_eq_curve(self, auto=None):
         s = self.settings
-        self.eq_curve.set_bands(manual_bands(VoiceEQParams(tilt=s.eq_tilt, manual_gains=list(s.eq_gains))), auto)
+        params = VoiceEQParams(tilt=s.eq_tilt, manual_gains=list(s.eq_gains))
+        self.eq_curve.set_bands(manual_bands(params), auto)
+        warning = heavy_eq_warning(params)
+        self.eq_warning.setText("⚠ " + warning if warning else "")
+        self.eq_warning.setVisible(bool(warning))
 
     def set_eq_result(self, auto_bands):
         """Show the automatic tonal-balance curve chosen during the last Enhance."""

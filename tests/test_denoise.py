@@ -137,9 +137,12 @@ def test_leading_noise_region():
     speech[200:400] = True  # first word at 2.0 s
     level = np.full(500, -60.0)
     a, b = leading_noise_region(speech, level, hop)
-    assert a == 0.05 and abs(b - 1.85) < 1e-9
+    assert a == 0.05 and abs(b - 1.9) < 1e-9
     short = np.zeros(500, bool)
-    short[100:] = True  # first word at 1.0 s: less than a second after the margins
+    short[60:] = True  # first word at 0.6 s: 0.45 s after the margins, enough (1.1.5)
+    a, b = leading_noise_region(short, level, hop)
+    assert a == 0.05 and abs(b - 0.5) < 1e-9
+    short[40:] = True  # first word at 0.4 s: only 0.25 s after the margins
     assert leading_noise_region(short, level, hop) is None
     assert leading_noise_region(speech, np.full(500, -120.0), hop) is None  # digital silence
     assert leading_noise_region(np.zeros(500, bool), level, hop) is None  # no speech at all

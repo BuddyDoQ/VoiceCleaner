@@ -239,6 +239,7 @@ def propose_rollback(report: QCReport, s: ProcessingSettings) -> tuple[Processin
         s.spectral_subtraction = max(1.0, s.spectral_subtraction * 0.85)
         s.reverb_reduction = round(s.reverb_reduction * 0.8, 3)
         s.noise_gate_db = min(s.noise_gate_db, -70.0) if s.noise_gate_db > -80 else s.noise_gate_db
+        s.pause_cleanup = round(s.pause_cleanup * 0.6, 3)
         notes.append("reduced noise reduction to protect speech")
     if "spectral_change" in codes:
         s.speech_enhancement = round(s.speech_enhancement * 0.7, 3)

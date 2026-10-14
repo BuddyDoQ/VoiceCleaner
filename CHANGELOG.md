@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.5
+
+- **Quieter, even pauses.** A new *Pause clean-up* stage (Advanced → Noise reduction) turns
+  down the background left between phrases and after the last word to an even, quiet room
+  tone, never to digital silence. Speech is not touched, and a laugh or breath in a pause stays
+  as it is. The AI model keeps its gate open for a moment after speech, so the end of a take
+  used to be much noisier than its start: on a real 6-second take, the trailing pause was
+  31 dB below the speech and the lead-in 41 dB. With 1.1.5 both are 55-56 dB below, and
+  hiss above 8 kHz in the pauses is 15-23 dB lower. It follows the Noise Reduction slider
+  (and Smart settings), like the other noise controls.
+- **Noise learned from short pauses.** A third of a second of steady noise before the first
+  word is now enough to learn the background automatically (it was a second). When there is
+  no learned profile, about 0.4 s of steady noise across all the pauses is now trusted for the
+  profile noise reduction (it was 0.75 s). Short, changing stretches (a rustle, a door) are
+  still not used.
+- **Batch and the command line learn the noise before the first word** too, as the Enhance
+  tab does when a recording opens, so a file comes out the same either way. Batch Preview
+  uses it as well.
+- **EQ warning.** When the EQ cuts the body of the voice (250 Hz-1 kHz) by 9 dB or more,
+  a note under the EQ says it can sound hollow or distant. The EQ is still applied as set.
+
 ## 1.1.4
 
 - **Opens more than WAV.** Phone voice memos (M4A/AAC), MP3, FLAC, Opus/OGG, AIFF, WMA and

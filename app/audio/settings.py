@@ -52,6 +52,7 @@ class ProcessingSettings:
     spectral_subtraction: float = 1.75  # over-subtraction factor of the profile denoiser
     max_attenuation_db: float = 24.0  # cap on noise reduction; keeps natural room tone
     noise_gate_db: float = -80.0  # downward expander threshold, -80 = off
+    pause_cleanup: float = 0.6  # 0..1, background turned down between phrases (0 = off)
     # speech enhancement / EQ
     voice_presence: float = 0.0  # -1..1
     hf_clarity: float = 0.0  # -1..1
@@ -150,7 +151,7 @@ USER_PRESETS: dict[str, dict] = {}
 # Fields Smart settings decides for each recording (it "always wins" on these).
 SMART_FIELDS = ("noise_reduction", "speech_enhancement", "room_reduction", "spectral_subtraction",
                 "max_attenuation_db", "lf_cleanup", "tonal_balance", "reverb_reduction", "echo_reduction",
-                "compressor_amount", "hum_removal")
+                "compressor_amount", "hum_removal", "pause_cleanup")
 # Built-in presets leave these alone: loudness, AI on/off, EQ and pauses are the user's.
 USER_OWNED_FIELDS = ("target_lufs", "peak_ceiling_dbtp", "normalize_loudness", "use_ai", "eq_gains", "eq_tilt",
                      "pause_shorten", "pause_min_s", "pause_keep_ms")
@@ -178,6 +179,7 @@ def apply_simple(s: ProcessingSettings, noise: float, speech: float, room: float
         s.max_attenuation_db = preset.max_attenuation_db
     else:
         s.max_attenuation_db = round(12.0 + 28.0 * s.noise_reduction, 1)
+    s.pause_cleanup = round(0.3 + 0.6 * s.noise_reduction, 2)
     s.lf_cleanup = round(0.2 + 0.5 * s.speech_enhancement, 2)
     s.tonal_balance = s.speech_enhancement
     s.reverb_reduction = s.room_reduction

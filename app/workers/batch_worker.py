@@ -10,8 +10,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
-from ..audio.analyzer import analyze
+from ..audio.analyzer import FRAME_HOP_S, analyze
 from ..audio.loader import load_wav
+from ..audio.noise_profile import learn_leading_noise
 from ..audio.pipeline import EnhancementPipeline
 from ..audio.settings import ProcessingSettings, smart_adapt
 from ..export.mp3_exporter import export_mp3
@@ -44,6 +45,11 @@ def enhance_file(path: Path, options: BatchOptions, model_manager, ctx: TaskCont
     analysis = analyze(audio.samples, audio.sample_rate, progress=lambda f: ctx.progress(0.1 * f, "Analyzing audio..."))
     # Smart sets only the controls it owns for each file; the user's other choices stay
     settings = smart_adapt(options.settings, analysis).settings if options.smart else options.settings
+    # the noise before the first word, learned as the Enhance tab does when a recording opens
+    learned = learn_leading_noise(audio.samples, audio.sample_rate, analysis.speech_mask,
+                                  analysis.frame_level_db, FRAME_HOP_S)
+    if learned is not None:
+        log.info("Batch: noise learned from %.2f-%.2f s of %s", *learned.regions[0], path.name)
 
     class Sub:
         def progress(self, f, m=""):
@@ -52,7 +58,7 @@ def enhance_file(path: Path, options: BatchOptions, model_manager, ctx: TaskCont
         def check(self):
             ctx.check()
 
-    result = EnhancementPipeline(model_manager).run(audio, analysis, settings, Sub())
+    result = EnhancementPipeline(model_manager).run(audio, analysis, settings, Sub(), learned_profile=learned)
     if settings.pause_settings().active:
         from ..audio.pauses import shorten_pauses
 

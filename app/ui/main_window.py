@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QBoxLayout, QButtonGroup, QCheckBox
                                QSlider, QStackedWidget, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
 from ..audio import noise_profile as noise_profile_mod
-from ..audio.analyzer import analyze
+from ..audio.analyzer import FRAME_HOP_S, analyze
 from ..audio.loader import format_duration, format_size, load_wav
 from ..audio.recorder import combine_with_original
 from ..audio.pipeline import EnhancementPipeline, PipelineResult
@@ -1015,10 +1015,9 @@ class MainWindow(QMainWindow):
         self._learn_leading_noise()
 
     def _learn_leading_noise(self):
-        """A recording that starts with at least a second of background noise (before the
-        first word): learn the noise profile from it, as if it had been selected by hand."""
-        from ..audio.analyzer import FRAME_HOP_S
-
+        """A recording that starts with background noise before the first word (a third of a
+        second of steady noise is enough, a second of any): learn the noise profile from it,
+        as if it had been selected by hand."""
         a = self.analysis
         pending, self._pending_room_tone = getattr(self, "_pending_room_tone", None), None
         if pending is not None and Path(self.audio.info.path) == pending[0]:
@@ -1029,19 +1028,24 @@ class MainWindow(QMainWindow):
                                           "(Clear Noise Profile to undo). Click Enhance.")
                 log.info("Noise profile from the recorded room tone %.2f-%.2f s", *region)
                 return
-        region = noise_profile_mod.leading_noise_region(a.speech_mask, a.frame_level_db, FRAME_HOP_S)
-        if region is None:
+        profile = noise_profile_mod.learn_leading_noise(self.audio.samples, self.audio.sample_rate, a.speech_mask,
+                                                        a.frame_level_db, FRAME_HOP_S)
+        if profile is None:
             return
-        if self._use_noise_profile(*region):
+        region = profile.regions[0]
+        if self._use_noise_profile(*region, profile=profile):
             self._set_profile_note(f"Noise learned from the start ({region[1] - region[0]:.1f} s)")
             self.status_label.setText("Ready. The noise before the first word was learned automatically "
                                       "(Clear Noise Profile to undo). Click Enhance.")
             log.info("Noise profile learned automatically from %.2f-%.2f s", *region)
 
-    def _use_noise_profile(self, a: float, b: float) -> bool:
-        """Learn the noise from ``a``..``b`` seconds and use it from now on."""
-        mono = self.audio.mono() if self.audio.channels > 1 else self.audio.samples[:, 0]
-        profile = noise_profile_mod.estimate(mono, self.audio.sample_rate, [(a, b)], source="learned", margin_s=0.0)
+    def _use_noise_profile(self, a: float, b: float, profile=None) -> bool:
+        """Learn the noise from ``a``..``b`` seconds (or use ``profile``, already measured
+        there) and use it from now on."""
+        if profile is None:
+            mono = self.audio.mono() if self.audio.channels > 1 else self.audio.samples[:, 0]
+            profile = noise_profile_mod.estimate(mono, self.audio.sample_rate, [(a, b)], source="learned",
+                                                 margin_s=0.0)
         if profile is None:
             return False
         self.learned_profile = profile
@@ -2235,9 +2239,13 @@ class MainWindow(QMainWindow):
             ctx.check()
             s = smart_adapt(settings, analysis).settings if smart else settings
             t0, t1 = best_preview_window(analysis)
+            # the same lead-in noise profile the batch itself will learn (batch_worker.enhance_file)
+            learned = noise_profile_mod.learn_leading_noise(audio.samples, audio.sample_rate, analysis.speech_mask,
+                                                            analysis.frame_level_db, FRAME_HOP_S)
             sub = type("Sub", (), {"progress": lambda _s, f, m="": ctx.progress(0.3 + 0.7 * f, m),
                                    "check": lambda _s: ctx.check()})()
-            pr = EnhancementPipeline(self._get_model_manager()).preview(audio, analysis, s, t0, t1, sub)
+            pr = EnhancementPipeline(self._get_model_manager()).preview(audio, analysis, s, t0, t1, sub,
+                                                                         learned_profile=learned)
             orig = np.asarray(audio.samples[pr.start_frame: pr.start_frame + pr.samples.shape[0]], np.float32)
             lo, le = (loudness.integrated_loudness(x, audio.sample_rate) for x in (orig, pr.samples))
             gain = float(10 ** ((le - lo) / 20)) if np.isfinite(lo) and np.isfinite(le) else 1.0

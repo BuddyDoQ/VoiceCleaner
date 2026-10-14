@@ -109,7 +109,7 @@ def test_batch_smart_keeps_user_choices(tmp_path, monkeypatch, noisy):
         def __init__(self, _mm):
             pass
 
-        def run(self, audio, analysis, settings, ctx):
+        def run(self, audio, analysis, settings, ctx, learned_profile=None):
             seen["settings"] = settings
             raise RuntimeError("stop here")
 

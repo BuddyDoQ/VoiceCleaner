@@ -219,6 +219,26 @@ def manual_bands(params: VoiceEQParams) -> list[EQBand]:
     return bands
 
 
+# The body of a voice: a deep cut here makes it sound hollow, distant or "telephone"-like.
+BODY_RANGE_HZ = (250.0, 1000.0)
+HEAVY_CUT_DB = 9.0
+
+
+def heavy_eq_warning(params: VoiceEQParams) -> str | None:
+    """A short warning when the user's EQ (graphic bands and tilt together) cuts the body
+    of the voice deeply, or None. Only a hint: the EQ is still applied as set."""
+    bands = manual_bands(params)
+    if not bands:
+        return None
+    freqs = np.geomspace(*BODY_RANGE_HZ, 48)
+    resp = response_db(bands, freqs)
+    i = int(np.argmin(resp))
+    if resp[i] > -HEAVY_CUT_DB + 0.1:  # a band set to exactly -9 dB counts
+        return None
+    return (f"The EQ cuts the body of the voice by {-resp[i]:.0f} dB around {freqs[i]:.0f} Hz, "
+            "which can make it sound hollow or distant. A cut of a few dB is usually enough.")
+
+
 def response_db(bands: list[EQBand], freqs: np.ndarray, sr: int = 48000) -> np.ndarray:
     """Magnitude response of ``bands`` as designed (what the listener hears)."""
     return dsp.sos_response_db(bands_to_sos(bands, sr, zero_phase=False), freqs, sr)

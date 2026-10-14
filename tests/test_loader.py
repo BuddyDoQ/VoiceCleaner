@@ -63,16 +63,27 @@ def test_digital_silence_rejected(wav_file):
         load_wav(wav_file(np.zeros(48000, np.float32)))
 
 
-def test_not_a_wav(tmp_path):
+def test_flac_opens_and_non_audio_is_refused(tmp_path, monkeypatch):
     p = tmp_path / "audio.flac"
-    sf.write(p, np.zeros(1000, np.float32) + 0.1, 48000, format="FLAC")
-    with pytest.raises(UnsupportedFormatError):
-        probe(p)
+    sf.write(p, np.zeros(9600, np.float32) + 0.1, 48000, format="FLAC")
+    assert probe(p).subtype_label == "FLAC 16-bit PCM"
+    monkeypatch.setenv("VOICECLEANER_FFMPEG", str(tmp_path / "missing.exe"))
+    junk = tmp_path / "notes.wav"
+    junk.write_bytes(b"RIFF this is not really audio")
+    with pytest.raises(AudioLoadError):
+        probe(junk)
 
 
-def test_too_many_channels(wav_file):
+def test_too_many_channels_without_ffmpeg(wav_file, tmp_path, monkeypatch):
+    monkeypatch.setenv("VOICECLEANER_FFMPEG", str(tmp_path / "missing.exe"))
     with pytest.raises(UnsupportedFormatError):
         load_wav(wav_file(np.random.default_rng(0).standard_normal((4800, 6)).astype(np.float32) * 0.1))
+
+
+@pytest.mark.skipif(__import__("app.audio.decode", fromlist=["x"]).ffmpeg_path() is None, reason="no FFmpeg")
+def test_surround_wav_is_mixed_down_with_ffmpeg(wav_file):
+    a = load_wav(wav_file(np.random.default_rng(0).standard_normal((9600, 6)).astype(np.float32) * 0.1))
+    assert a.channels == 2
 
 
 def test_nan_samples_repaired(wav_file, speech):

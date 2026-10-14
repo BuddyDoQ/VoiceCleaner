@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.1.4
+
+- **Opens more than WAV.** Phone voice memos (M4A/AAC), MP3, FLAC, Opus/OGG, AIFF, WMA and
+  AMR, and the sound of video files such as Zoom recordings (MP4, MOV, MKV, WebM, AVI): in the
+  Enhance tab, Batch, Compile and Playback. The first audio track is used; surround is mixed
+  down to stereo. Results are WAV (or MP3), named after the original. M4A, AAC, WMA and video
+  are decoded by an LGPL build of FFmpeg that ships with VoiceCleaner (its source code is
+  attached to the release).
+- **Batch preview:** turn on *Preview* in the Batch tab (`P`) and click a file to hear a
+  10-second sample (the part with the most speech) enhanced with the current settings, A/B
+  at equal loudness. Clicking another file previews that one, and the sample follows setting
+  changes, so you can tune before enhancing everything.
+- **Command line:** `VoiceCleanerCLI --batch recordings out --preset Natural` enhances files
+  and folders without the window (`--format mp3`, `--bits 16`, `--recursive`, `--no-smart`,
+  `--list-presets`), with one progress line per file and an exit code for scripts.
+- **Recording options** (Enhance tab, *Record*): a **3-second countdown** before recording
+  starts, and **Record 1 s of room tone first**: a quiet second (*Stay quiet* → *Speak now*)
+  that becomes the noise profile of the take. Big, colour-coded cues show what to do: *GET
+  READY · 3*, *STAY QUIET*, *SPEAK NOW*. Both options are remembered.
+- **Clipping repair.** Recordings made too loud have their cut-off peaks rebuilt (sparse
+  declipping): every unclipped sample stays as recorded, and the lost peaks are filled in
+  from the surrounding sound. It runs automatically when clipping is detected (*Advanced →
+  Repair clipping*). On clipped test speech, intelligibility (STOI) after enhancing rose
+  from 0.88-0.97 to 0.94-0.99.
+- **Enhance pauses playback** (whichever track is playing) until it is done; Play waits until
+  then, so you never hear a half-finished state.
+- **Fixed:** the installer's side panel showed the VoiceCleaner name cut off (1.1.3).
+- **README:** download links and what VoiceCleaner does come first; building from source
+  moved to `BUILDING.md`.
+
 ## 1.1.3
 
 - **Noise learned automatically.** When a recording starts with at least a second of

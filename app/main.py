@@ -4,6 +4,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from app.audio.decode import AUDIO_EXTENSIONS
+
 if __package__ in (None, ""):  # allow `python app/main.py`
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     __package__ = "app"
@@ -81,6 +83,12 @@ def check_updates_cli() -> int:
 
 
 def main() -> int:
+    # the command line: VoiceCleanerCLI.exe always, VoiceCleaner.exe with --batch / --list-presets
+    cli_exe = Path(sys.executable).stem.lower() == "voicecleanercli"
+    if cli_exe or any(a in ("--batch", "--list-presets") for a in sys.argv[1:]):
+        from app import cli
+
+        return cli.main()
     if len(sys.argv) in (4, 5) and sys.argv[1] == "--selftest":
         return selftest(*sys.argv[2:])
     if len(sys.argv) == 2 and sys.argv[1] == "--list-inputs":
@@ -127,7 +135,7 @@ def main() -> int:
         def eventFilter(self, obj, event):
             if event.type() == QEvent.Type.FileOpen:
                 p = Path(event.file())
-                if p.suffix.lower() in (".wav", ".wave") and p.exists():
+                if p.suffix.lower() in AUDIO_EXTENSIONS and p.exists():
                     if self.window is None:
                         self.pending.append(p)
                     else:
@@ -192,7 +200,7 @@ def main() -> int:
     finder_open.pending.clear()
     for arg in sys.argv[1:]:
         p = Path(arg)
-        if p.suffix.lower() in (".wav", ".wave") and p.exists():
+        if p.suffix.lower() in AUDIO_EXTENSIONS and p.exists():
             window.open_file(p)
             break
     return app.exec()

@@ -123,6 +123,7 @@ UNDO_SETTLE_MS = 450  # a slider drag or a burst of clicks becomes one undo step
 
 FIELD_NAMES = {  # names for "Undo …" where the control has no slider label
     "preset": "Preset", "smart": "Smart settings", "eq_gains": "EQ", "use_ai": "AI speech enhancement",
+    "declip": "Repair clipping",
     "normalize_loudness": "Normalize loudness", "pause_shorten": "Shorten long pauses",
     "noise_reduction": "Noise Reduction", "speech_enhancement": "Speech Enhancement",
     "room_reduction": "Room / Echo Reduction",
@@ -313,6 +314,12 @@ class SettingsPanel(QWidget):
                                "When off, only traditional spectral noise reduction is used.")
         self.use_ai.toggled.connect(lambda v: self._advanced_changed("use_ai", v))
         g.addWidget(self.use_ai)
+        self.declip_box = QCheckBox("Repair clipping")
+        self.declip_box.setToolTip("When a recording was made too loud, its peaks are cut off flat (harsh distortion).\n"
+                                   "VoiceCleaner rebuilds those peaks from the surrounding sound. Only clipped\n"
+                                   "recordings are touched, and only where they clipped.")
+        self.declip_box.toggled.connect(lambda v: self._advanced_changed("declip", v))
+        g.addWidget(self.declip_box)
         self._adv(g, "noise_reduction", "Noise reduction amount", 0, 1, 0.01, pct)
         self._adv(g, "noise_floor_offset_db", "Noise floor estimate", -6, 6, 0.5, db_fmt,
                   "Shifts the estimated background level. Raise it if noise remains, lower it if speech sounds thin.")
@@ -533,7 +540,7 @@ class SettingsPanel(QWidget):
         for key, w in self._advanced.items():
             w.set_value(float(getattr(s, key)))
         for box, val in ((self.use_ai, s.use_ai), (self.normalize, s.normalize_loudness),
-                         (self.pause_box, s.pause_shorten)):
+                         (self.pause_box, s.pause_shorten), (self.declip_box, s.declip)):
             box.blockSignals(True)
             box.setChecked(val)
             box.blockSignals(False)

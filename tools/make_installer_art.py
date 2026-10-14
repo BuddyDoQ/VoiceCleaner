@@ -28,12 +28,12 @@ def dialog_bmp(path: Path):
     p.fillRect(QRectF(0, 0, 164, 312), QColor(theme.NIGHT["BG"]))
     p.fillRect(QRectF(162, 0, 2, 312), QColor(theme.NIGHT["ACCENT"]))
     p.drawPixmap(22, 54, logo_pixmap(120, dpr=1))
-    f = QFont(theme.FONT_DISPLAY)
+    f = QFont(theme.BRAND_DISPLAY)  # artwork: always the brand faces
     f.setPixelSize(30)
     p.setFont(f)
     p.setPen(QColor(theme.NIGHT["TEXT"]))
     p.drawText(QRectF(0, 186, 164, 34), Qt.AlignHCenter, "VOICECLEANER")
-    f = QFont(theme.FONT_MONO)
+    f = QFont(theme.BRAND_MONO)
     f.setPixelSize(9)
     f.setLetterSpacing(QFont.AbsoluteSpacing, 1.5)
     p.setFont(f)
@@ -51,7 +51,7 @@ def banner_bmp(path: Path):
     p.fillRect(QRectF(493 - 120, 0, 120, 58), QColor(theme.NIGHT["BG"]))
     p.fillRect(QRectF(493 - 122, 0, 2, 58), QColor(theme.NIGHT["ACCENT"]))
     p.drawPixmap(493 - 104, 6, logo_pixmap(46, dpr=1))
-    f = QFont(theme.FONT_DISPLAY)
+    f = QFont(theme.BRAND_DISPLAY)  # artwork: always the brand faces
     f.setPixelSize(15)
     p.setFont(f)
     p.setPen(QColor(theme.NIGHT["TEXT"]))

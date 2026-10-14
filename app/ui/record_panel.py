@@ -11,7 +11,7 @@ import time
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QLinearGradient, QPainter
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
                                QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget)
 
@@ -135,6 +135,56 @@ class _SourceRow(QWidget):
         return 10 ** (self.trim.value() / 20)
 
 
+class CueBanner(QWidget):
+    """A big, colour-coded instruction across the Record strip: GET READY (the countdown),
+    STAY QUIET (room tone, with a bar running down), SPEAK NOW."""
+
+    COLORS = {"ready": "ACCENT", "quiet": "WARNING", "speak": "SUCCESS"}
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.kind, self.text, self.fraction = "", "", None
+        self.setFixedHeight(64)
+        self.setVisible(False)
+
+    def show_cue(self, kind: str, text: str, fraction: float | None = None):
+        if (kind, text, fraction) != (self.kind, self.text, self.fraction):
+            self.kind, self.text, self.fraction = kind, text, fraction
+            self.update()
+        self.setVisible(True)
+
+    def clear(self):
+        self.kind, self.text, self.fraction = "", "", None
+        self.setVisible(False)
+
+    def paintEvent(self, _e):
+        if not self.kind:
+            return
+        color = getattr(theme, self.COLORS.get(self.kind, "ACCENT"))
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        p.setPen(QPen(theme.qcolor(color), 2))
+        p.setBrush(theme.qcolor(color, 40))
+        p.drawRoundedRect(r, 10, 10)
+        if self.fraction is not None:  # time left, running down
+            bar = QRectF(r.left() + 10, r.bottom() - 9, (r.width() - 20) * max(0.0, min(1.0, self.fraction)), 4)
+            p.setPen(Qt.NoPen)
+            p.setBrush(theme.qcolor(color))
+            p.drawRoundedRect(bar, 2, 2)
+        f = QFont(theme.FONT_UI)
+        f.setPointSizeF(theme.pt(20))
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(theme.qcolor(color))
+        p.drawText(r.adjusted(0, 0, 0, -6 if self.fraction is not None else 0), Qt.AlignCenter, self.text)
+        p.end()
+
+
+COUNTDOWN_S = 3
+ROOM_TONE_S = 1.0  # quiet recorded first, used as the noise profile
+
+
 class RecordPanel(QFrame):
     captureStarted = Signal()  # audio is arriving; overdub monitoring may start now
     liveUpdate = Signal(object, float)  # WaveformOverview | None, offset seconds
@@ -142,6 +192,7 @@ class RecordPanel(QFrame):
     finished = Signal(object, str, float, float)  # RecordingResult, mode, position_s, latency_s
     failed = Signal(str, str)
     closeRequested = Signal()
+    countdownChanged = Signal(int)  # seconds left before recording starts; 0 = over (or cancelled)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -161,6 +212,9 @@ class RecordPanel(QFrame):
         self._announced = False
         self._silence_warned = False
         self._stopping = None
+        self._count = 0  # countdown in progress (seconds left)
+        self._room_tone = 0.0  # this take starts with this much room tone
+        self.last_room_tone = 0.0  # of the take just finished (read by the window)
 
         v = QVBoxLayout(self)
         v.setContentsMargins(14, 10, 14, 12)
@@ -214,6 +268,23 @@ class RecordPanel(QFrame):
         bottom.addWidget(self.monitor)
         v.addLayout(bottom)
 
+        opts = QHBoxLayout()
+        opts.setSpacing(16)
+        self.countdown_box = QCheckBox(f"{COUNTDOWN_S}-second countdown")
+        self.countdown_box.setToolTip("Count down 3, 2, 1 before recording starts, to get ready.\n"
+                                      "Click Record (or press R) again during the countdown to cancel.")
+        self.roomtone_box = QCheckBox(f"Record {ROOM_TONE_S:g} s of room tone first")
+        self.roomtone_box.setToolTip("Recording starts with a moment of quiet: stay silent until it says Speak now.\n"
+                                     "That second is used as the noise profile, so the background noise\n"
+                                     "is measured exactly. For new recordings (not Append or Overdub).")
+        opts.addWidget(self.countdown_box)
+        opts.addWidget(self.roomtone_box)
+        opts.addStretch(1)
+        v.addLayout(opts)
+        self._count_timer = QTimer(self)
+        self._count_timer.setInterval(1000)
+        self._count_timer.timeout.connect(self._count_tick)
+
         act = QHBoxLayout()
         self.rec_btn = QPushButton("●  Record")
         self.rec_btn.setProperty("role", "recbig")
@@ -235,6 +306,9 @@ class RecordPanel(QFrame):
         self.status.setWordWrap(True)
         self.status.setProperty("role", "faint")
         v.addWidget(self.status)
+        self.cue = CueBanner()
+        v.addWidget(self.cue)
+        self._speak_until = 0.0  # show SPEAK NOW until this capture time
 
         self.timer = QTimer(self)
         self.timer.setInterval(40)
@@ -274,27 +348,92 @@ class RecordPanel(QFrame):
         self._mode = self.mode.currentData()
         self.monitor.setVisible(self._mode == "overdub")
         self.mode.setVisible(self.has_original)
+        # a quiet second in the middle of an Append or Overdub would be a gap
+        self.roomtone_box.setEnabled(self._mode == "new")
+
+    def options(self) -> dict:
+        """Remembered between sessions."""
+        return {"countdown": self.countdown_box.isChecked(), "room_tone": self.roomtone_box.isChecked()}
+
+    def restore_options(self, o: dict):
+        if isinstance(o, dict):
+            self.countdown_box.setChecked(bool(o.get("countdown", False)))
+            self.roomtone_box.setChecked(bool(o.get("room_tone", False)))
 
     @property
     def recording(self) -> bool:
-        return self.session is not None
+        return self.session is not None or self._count > 0
+
+    @property
+    def counting_down(self) -> bool:
+        return self._count > 0
 
     # --- record / stop -----------------------------------------------------------------
     def toggle(self):
         if self._stopping is not None:
             return
-        if self.session is None:
+        if self._count > 0:
+            self.cancel_countdown()
+        elif self.session is None:
             self.start()
         else:
             self.stop()
 
-    def start(self):
+    def _sources(self):
         sources, gains = [], []
         for row in (self.mic_row, self.desk_row):
             if row.source is not None:
                 sources.append(row.source)
                 gains.append(row.gain)
+        return sources, gains
+
+    def start(self):
+        if not self._sources()[0]:
+            self.status.setText("Choose a microphone or a desktop audio source first.")
+            return
+        if not self.countdown_box.isChecked():
+            self._begin_capture()
+            return
+        self._count = COUNTDOWN_S
+        self._set_controls_enabled(False)
+        self.rec_btn.setText("\u2715  Cancel")
+        self.time_label.setText(f"Starting in {self._count}\u2026")
+        self.status.setText("Get ready.")
+        self.cue.show_cue("ready", f"GET READY  \u00b7  {self._count}")
+        self.countdownChanged.emit(self._count)
+        self.recordingChanged.emit(True)
+        self._count_timer.start()
+
+    def _count_tick(self):
+        self._count -= 1
+        if self._count > 0:
+            self.time_label.setText(f"Starting in {self._count}\u2026")
+            self.cue.show_cue("ready", f"GET READY  \u00b7  {self._count}")
+            self.countdownChanged.emit(self._count)
+            return
+        self._count_timer.stop()
+        self.countdownChanged.emit(0)
+        self._begin_capture()
+
+    def cancel_countdown(self):
+        if self._count <= 0:
+            return
+        self._count = 0
+        self._count_timer.stop()
+        self.countdownChanged.emit(0)
+        self._reset()
+        self.status.setText("Countdown cancelled.")
+
+    def _set_controls_enabled(self, on: bool):
+        for w in (self.mic_row, self.desk_row, self.mode, self.monitor, self.refresh_btn, self.close_btn,
+                  self.countdown_box):
+            w.setEnabled(on)
+        self.roomtone_box.setEnabled(on and self._mode == "new")
+
+    def _begin_capture(self):
+        sources, gains = self._sources()
         if not sources:
+            self._reset()
             self.status.setText("Choose a microphone or a desktop audio source first.")
             return
         try:
@@ -309,12 +448,21 @@ class RecordPanel(QFrame):
         self._play_started = None
         self._announced = False
         self._silence_warned = False
+        self._room_tone = ROOM_TONE_S if (self.roomtone_box.isChecked() and self._mode == "new") else 0.0
         self.rec_btn.setText("■  Stop")
         self.discard_btn.setVisible(True)
-        for w in (self.mic_row, self.desk_row, self.mode, self.monitor, self.refresh_btn, self.close_btn):
-            w.setEnabled(False)
+        self._set_controls_enabled(False)
         self.time_label.setText("Starting…")
-        self.status.setText("")
+        self.status.setText("Stay quiet: recording the room tone\u2026" if self._room_tone else "")
+        if self._room_tone:
+            self.cue.show_cue("quiet", "\u25cf  STAY QUIET", 1.0)
+            self._speak_until = self._room_tone + 2.0
+        elif self.countdown_box.isChecked():
+            self.cue.show_cue("speak", "SPEAK NOW")
+            self._speak_until = 2.0
+        else:
+            self.cue.clear()
+            self._speak_until = 0.0
         self.timer.start()
         self.recordingChanged.emit(True)
 
@@ -337,6 +485,8 @@ class RecordPanel(QFrame):
         self.time_label.setText("Saving…")
         mode, position = self._mode, self._position
         play_started, out_latency = self._play_started, self._out_latency
+        # only when the quiet second was really recorded
+        room = self._room_tone if session is not None and session.elapsed >= self._room_tone + 0.3 else 0.0
 
         def work(ctx):
             return session.stop()
@@ -348,6 +498,7 @@ class RecordPanel(QFrame):
                 # time the sound took to come out of the speakers and back in
                 latency = max(0.0, (play_started - result.start_time) + out_latency + INPUT_LATENCY_S)
             self._reset()
+            self.last_room_tone = room
             self.finished.emit(result, mode, position, latency)
 
         def fail(title, message, _cancelled):
@@ -376,13 +527,15 @@ class RecordPanel(QFrame):
             self.session = None
 
     def _reset(self):
+        self.cue.clear()
         self.session = None
         self._stopping = None
+        self._count = 0
+        self._count_timer.stop()
         self.rec_btn.setEnabled(True)
         self.rec_btn.setText("●  Record")
         self.discard_btn.setVisible(False)
-        for w in (self.mic_row, self.desk_row, self.mode, self.monitor, self.refresh_btn, self.close_btn):
-            w.setEnabled(True)
+        self._set_controls_enabled(True)
         self.time_label.setText("")
         self.time_label.setProperty("tone", "")
         theme.restyle(self.time_label)
@@ -409,6 +562,19 @@ class RecordPanel(QFrame):
             self._announced = True
             self.captureStarted.emit()
         self.time_label.setText(f"● REC  {format_duration(s.elapsed)}")
+        prompt = []  # the status line is rebuilt every tick: the room-tone prompt goes first
+        if self._room_tone and s.elapsed < self._room_tone:
+            self.cue.show_cue("quiet", "\u25cf  STAY QUIET", 1.0 - s.elapsed / self._room_tone)
+        elif s.elapsed < self._speak_until:
+            self.cue.show_cue("speak", "SPEAK NOW")
+        elif self.cue.isVisible():
+            self.cue.clear()
+        if self._room_tone:
+            if s.elapsed < self._room_tone:
+                self.time_label.setText(f"● REC  {format_duration(s.elapsed)}  \u00b7  stay quiet\u2026")
+                prompt = ["Stay quiet: recording the room tone\u2026"]
+            elif s.elapsed < self._room_tone + 3.0:
+                prompt = ["Speak now."]
         if self.time_label.property("tone") != "record":
             self.time_label.setProperty("tone", "record")
             theme.restyle(self.time_label)
@@ -416,7 +582,7 @@ class RecordPanel(QFrame):
         if mins.size:
             ov = WaveformOverview(mins, maxs, rms, 48_000, mins.size * 64)
             self.liveUpdate.emit(ov, self._offset())
-        msgs = list(s.errors)
+        msgs = prompt + list(s.errors)
         if not self._silence_warned:
             silent = s.silent_sources()
             if silent:

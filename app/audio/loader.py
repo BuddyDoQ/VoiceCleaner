@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from . import decode
 from ..utils.errors import AudioLoadError, EmptyAudioError, InsufficientMemoryError, UnsupportedFormatError
 from ..utils.hardware import available_ram_bytes
 from ..utils.logging import get_logger
@@ -25,6 +26,10 @@ from ..utils.logging import get_logger
 log = get_logger("loader")
 
 WAV_CONTAINERS = {"WAV", "WAVEX", "RF64", "W64"}
+# other containers libsndfile reads directly; the rest goes through FFmpeg (see decode.py)
+NATIVE_CONTAINERS = WAV_CONTAINERS | {"FLAC", "MP3", "OGG", "AIFF", "CAF"}
+DECODED = "FFMPEG"  # container of a file decoded by FFmpeg
+CONTAINER_LABELS = {"FLAC": "FLAC", "MP3": "MP3", "OGG": "Ogg", "AIFF": "AIFF", "CAF": "CAF"}
 SUBTYPE_LABELS = {
     "PCM_U8": "8-bit PCM",
     "PCM_16": "16-bit PCM",
@@ -36,6 +41,9 @@ SUBTYPE_LABELS = {
     "ALAW": "A-law",
     "IMA_ADPCM": "IMA ADPCM",
     "MS_ADPCM": "MS ADPCM",
+    "MPEG_LAYER_III": "MP3",
+    "VORBIS": "Vorbis",
+    "OPUS": "Opus",
 }
 MIN_SAMPLE_RATE = 8_000
 MAX_SAMPLE_RATE = 384_000
@@ -63,7 +71,16 @@ class AudioFileInfo:
 
     @property
     def subtype_label(self) -> str:
-        return SUBTYPE_LABELS.get(self.subtype, self.subtype)
+        label = SUBTYPE_LABELS.get(self.subtype, self.subtype)
+        if self.container in WAV_CONTAINERS or self.container == DECODED:
+            return label
+        kind = CONTAINER_LABELS.get(self.container, self.container)
+        return label if kind in label else f"{kind} {label}"  # "FLAC 24-bit PCM", "MP3"
+
+    @property
+    def decoded(self) -> bool:
+        """Read through FFmpeg (M4A, video, ...), not directly."""
+        return self.container == DECODED
 
     @property
     def bit_depth_label(self) -> str:
@@ -119,55 +136,73 @@ def format_size(num_bytes: int) -> str:
     return f"{size:.1f} GB"
 
 
+def _probe_decoded(path: Path, size: int) -> AudioFileInfo:
+    """Header check of a file FFmpeg reads (nothing is decoded yet)."""
+    st = decode.inspect(path)
+    frames = int(round(st.duration * st.sample_rate)) if st.duration else st.sample_rate * 60
+    ext = path.suffix.lstrip(".").upper()
+    label = f"{st.codec} ({ext})" if ext and ext != st.codec else st.codec
+    return AudioFileInfo(path, st.sample_rate, min(2, st.channels), frames, label, DECODED, size)
+
+
 def probe(path: str | os.PathLike) -> AudioFileInfo:
-    """Read and validate the header of a WAV file without loading samples."""
+    """Read and validate the header of a recording without loading samples: WAV and what
+    libsndfile reads directly, or (through FFmpeg) M4A, AAC, WMA and the sound of videos."""
     path = Path(path)
     if not path.exists():
         raise AudioLoadError(f"The file “{path.name}” could not be found.")
     if path.is_dir():
-        raise AudioLoadError(f"“{path.name}” is a folder, not a WAV file.")
+        raise AudioLoadError(f"“{path.name}” is a folder, not a recording.")
     size = path.stat().st_size
     if size == 0:
         raise EmptyAudioError(f"“{path.name}” is empty (0 bytes).")
+    if decode.needs_ffmpeg(path):
+        return _check(_probe_decoded(path, size))
     try:
         info = sf.info(str(path))
     except Exception as exc:
         log.info("probe failed for %s: %s", path, exc)
-        if path.suffix.lower() not in (".wav", ".wave"):
-            raise UnsupportedFormatError(
-                f"“{path.name}” is not a WAV file. VoiceCleaner opens WAV recordings only."
-            ) from exc
+        if path.suffix.lower() not in decode.WAV_EXTENSIONS and decode.ffmpeg_path() is not None:
+            return _check(_probe_decoded(path, size))  # e.g. an MP3 libsndfile cannot read: FFmpeg can
         raise AudioLoadError(
-            f"“{path.name}” appears to be damaged or is not a valid WAV file."
+            f"“{path.name}” appears to be damaged or is not a recording VoiceCleaner can read."
         ) from exc
 
-    if info.format not in WAV_CONTAINERS:
+    if info.format not in NATIVE_CONTAINERS or info.channels > 2:
+        if decode.ffmpeg_path() is not None:  # an unusual container or surround: FFmpeg mixes it down
+            return _check(_probe_decoded(path, size))
+        if info.channels > 2:
+            raise UnsupportedFormatError(
+                f"“{path.name}” has {info.channels} channels. Only mono and stereo recordings are supported."
+            )
+        raise UnsupportedFormatError(f"“{path.name}” is a {info.format_info or info.format} file, "
+                                     "which VoiceCleaner cannot open.")
+    if info.channels < 1:
+        raise UnsupportedFormatError(f"“{path.name}” has no audio channels.")
+    return _check(AudioFileInfo(path, info.samplerate, info.channels, info.frames, info.subtype, info.format, size))
+
+
+def _check(info: AudioFileInfo) -> AudioFileInfo:
+    """Limits every recording must meet."""
+    path = info.path
+    if not MIN_SAMPLE_RATE <= info.sample_rate <= MAX_SAMPLE_RATE:
         raise UnsupportedFormatError(
-            f"“{path.name}” is a {info.format_info or info.format} file. "
-            "VoiceCleaner opens WAV recordings only."
-        )
-    if info.channels < 1 or info.channels > 2:
-        raise UnsupportedFormatError(
-            f"“{path.name}” has {info.channels} channels. Only mono and stereo WAV files are supported."
-        )
-    if not MIN_SAMPLE_RATE <= info.samplerate <= MAX_SAMPLE_RATE:
-        raise UnsupportedFormatError(
-            f"The sample rate of “{path.name}” ({info.samplerate} Hz) is not supported. "
+            f"The sample rate of “{path.name}” ({info.sample_rate} Hz) is not supported. "
             f"Use a recording between {MIN_SAMPLE_RATE // 1000} kHz and {MAX_SAMPLE_RATE // 1000} kHz."
         )
     if info.frames <= 0:
         raise EmptyAudioError(f"“{path.name}” contains no audio samples.")
-    if info.frames / info.samplerate < MIN_DURATION_S:
+    if info.duration < MIN_DURATION_S:
         raise EmptyAudioError(
-            f"“{path.name}” is only {info.frames / info.samplerate * 1000:.0f} ms long. "
+            f"“{path.name}” is only {info.duration * 1000:.0f} ms long. "
             "Recordings need to be at least a tenth of a second."
         )
-    if info.frames / info.samplerate > MAX_DURATION_S:
+    if info.duration > MAX_DURATION_S:
         raise AudioLoadError(
             f"“{path.name}” is longer than {MAX_DURATION_S // 3600} hours. "
             "Split it into shorter parts before enhancing."
         )
-    return AudioFileInfo(path, info.samplerate, info.channels, info.frames, info.subtype, info.format, size)
+    return info
 
 
 class _TempStore:
@@ -220,7 +255,26 @@ def allocate(frames: int, channels: int, disk: bool | None = None) -> np.ndarray
 
 
 def load_wav(path: str | os.PathLike, force_disk: bool | None = None) -> AudioData:
+    """Load any recording VoiceCleaner opens (the name stays for history: WAV came first)."""
     info = probe(path)
+    if not info.decoded:
+        return _load(info, Path(info.path), force_disk)
+    # FFmpeg decodes it into a temporary float WAV; it is read like any WAV, then deleted
+    fd, tmp = tempfile.mkstemp(suffix=".wav", dir=temp_store.directory)
+    os.close(fd)
+    tmp = Path(tmp)
+    try:
+        decode.decode_to_wav(info.path, tmp)
+        actual = sf.info(str(tmp))
+        info = AudioFileInfo(info.path, actual.samplerate, actual.channels, actual.frames, info.subtype,
+                             DECODED, info.file_size)
+        return _load(_check(info), tmp, force_disk)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _load(info: AudioFileInfo, source: Path, force_disk: bool | None) -> AudioData:
+    """Read the samples of ``source`` (the file itself, or its decoded copy)."""
     disk = should_use_disk(info.frames, info.channels) if force_disk is None else force_disk
     log.info(
         "Loading %s (%d Hz, %d ch, %s, %.1f s, %s)",
@@ -230,7 +284,7 @@ def load_wav(path: str | os.PathLike, force_disk: bool | None = None) -> AudioDa
     try:
         samples = allocate(info.frames, info.channels, disk)
         pos = 0
-        with sf.SoundFile(str(info.path)) as f:
+        with sf.SoundFile(str(source)) as f:
             for block in f.blocks(blocksize=READ_BLOCK_FRAMES, dtype="float32", always_2d=True):
                 n = min(block.shape[0], info.frames - pos)
                 samples[pos : pos + n] = block[:n]

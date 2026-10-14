@@ -11,6 +11,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+from ..audio.decode import AUDIO_EXTENSIONS
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QFileDialog, QHBoxLayout, QHeaderView,
                                QLineEdit, QPushButton, QSlider, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
@@ -44,7 +45,7 @@ class _SortItem(QTableWidgetItem):
 
 
 def scan_folder(root: Path, ctx=None, max_files: int = MAX_FILES) -> tuple[list[dict], int]:
-    """All playable WAV files under ``root`` (recursive). Returns (entries, skipped)."""
+    """All playable recordings under ``root`` (recursive). Returns (entries, skipped)."""
     entries, skipped = [], 0
     root = Path(root)
     base_depth = len(root.parts)
@@ -54,7 +55,7 @@ def scan_folder(root: Path, ctx=None, max_files: int = MAX_FILES) -> tuple[list[
             dirnames[:] = []
         dirnames[:] = [d for d in dirnames if not d.startswith(".")]  # skip .parts and hidden folders
         for f in filenames:
-            if f.lower().endswith((".wav", ".wave")):
+            if f.lower().endswith(AUDIO_EXTENSIONS):
                 candidates.append(Path(dirpath) / f)
         if len(candidates) >= max_files:
             break

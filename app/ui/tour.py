@@ -96,6 +96,22 @@ WHATS_NEW = [
          "VoiceCleaner now uses your system's fonts. Prefer the Steamburger Studios look? "
          "⋯ menu → Appearance → Brand Fonts.",
          target=lambda w: w.menu_btn, version="1.1.3"),
+    Step("Phone memos, MP3s and videos",
+         "Open M4A voice memos, MP3, FLAC, Opus and WMA files, and the sound of videos such as "
+         "Zoom recordings (MP4, MOV, MKV): drop them here, or several at once on the Batch tab.",
+         tab=0, target=lambda w: w.drop_zone if w.drop_zone.isVisible() else None, version="1.1.4"),
+    Step("Hear a sample before a batch",
+         "Turn on Preview and click a file: 10 seconds with the most speech, enhanced with the "
+         "current settings. Switch A/B to compare; it follows your setting changes.",
+         tab=3, target=lambda w: w.batch_panel.preview_btn, version="1.1.4"),
+    Step("Clipping repaired",
+         "Recorded too loud? VoiceCleaner now rebuilds the peaks that were cut off, automatically "
+         "when it finds clipping (Advanced → Repair clipping).",
+         tab=0, version="1.1.4"),
+    Step("Countdown and room tone",
+         "Record has two new options: a 3-second countdown, and one quiet second recorded "
+         "first, which VoiceCleaner uses to measure your room's background noise.",
+         tab=0, version="1.1.4"),
 ]
 
 

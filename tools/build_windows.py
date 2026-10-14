@@ -12,6 +12,7 @@ Result:
         edition.txt           "standard" or "gpu" (read by the app)
         _internal/            Python, Qt, PyTorch, ...
         models/               bundled AI model (DeepFilterNet3, 9 MB)
+        ffmpeg/               LGPL FFmpeg (ffmpeg.exe + DLLs): opens M4A, AAC, WMA and videos
         LICENSES/             third-party license notes
 
 The 490 MB voice re-synthesis model (BigVGAN) is not bundled: the app downloads it
@@ -58,6 +59,10 @@ def build(edition: str, python: Path, skip_tests: bool = False) -> Path:
         shutil.copytree(ROOT / "models" / name, models_out / name,
                         ignore=shutil.ignore_patterns("*.log", "__pycache__"))
     (dist / "edition.txt").write_text(edition, encoding="utf-8")
+    sys.path.insert(0, str(ROOT / "tools"))
+    from fetch_ffmpeg import fetch
+
+    fetch(dist / "ffmpeg")  # LGPL build, run as a separate program
 
     lic = dist / "LICENSES"
     lic.mkdir(exist_ok=True)
@@ -65,6 +70,8 @@ def build(edition: str, python: Path, skip_tests: bool = False) -> Path:
     shutil.copy(ROOT / "THIRD_PARTY_LICENSES.md", lic / "THIRD_PARTY_LICENSES.md")
     shutil.copy(ROOT / "LICENSE", lic / "VoiceCleaner-LICENSE.txt")
     shutil.copy(ROOT / "app" / "ai" / "vendor" / "bigvgan" / "LICENSE", lic / "BigVGAN-LICENSE.txt")
+    shutil.copy(dist / "ffmpeg" / "LICENSE.txt", lic / "FFmpeg-LICENSE.txt")
+    shutil.copy(dist / "ffmpeg" / "README.txt", lic / "FFmpeg-README.txt")
     for f in (ROOT / "app" / "ui" / "assets" / "fonts").glob("*-OFL.txt"):
         shutil.copy(f, lic / f.name)
     size = sum(f.stat().st_size for f in dist.rglob("*") if f.is_file())

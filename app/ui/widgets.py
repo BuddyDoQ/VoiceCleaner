@@ -127,7 +127,7 @@ class DropZone(QFrame):
         self.icon.setPixmap(logo_pixmap(96))
         self.icon.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.icon)
-        title = label("DROP A WAV FILE HERE", "display")
+        title = label("DROP A RECORDING HERE", "display")
         title.setAlignment(Qt.AlignCenter)
         lay.addWidget(title)
         sub = label("VoiceCleaner removes background noise, room echo and hum, and makes speech clear and even.",
@@ -136,7 +136,7 @@ class DropZone(QFrame):
         sub.setFixedWidth(460)
         keep_all_lines(sub)  # wrapped text keeps all its lines, whatever font it ends up with
         lay.addWidget(sub, alignment=Qt.AlignCenter)
-        btn = QPushButton("Choose WAV File")
+        btn = QPushButton("Choose a Recording")
         btn.setProperty("role", "primary")
         btn.setCursor(Qt.PointingHandCursor)
         btn.clicked.connect(self.chooseClicked)
@@ -157,7 +157,7 @@ class DropZone(QFrame):
         buttons.addWidget(prompter)
         buttons.addStretch(1)
         lay.addLayout(buttons)
-        hint = label("Mono or stereo • 16/24-bit or 32-bit float • 44.1, 48, 96 kHz and more • "
+        hint = label("WAV, MP3, M4A, FLAC, Opus, WMA and the sound of videos (MP4, MOV, MKV) • "
                      "drop several files for batch processing", "faint", wrap=True)
         hint.setAlignment(Qt.AlignCenter)
         lay.addWidget(hint)

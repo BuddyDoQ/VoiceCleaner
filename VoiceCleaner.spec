@@ -68,7 +68,23 @@ exe = EXE(
     upx=False,
 )
 
-coll = COLLECT(exe, a.binaries, a.zipfiles, a.datas, strip=False, upx=False, name="VoiceCleaner")
+executables = [exe]
+if not MAC:
+    # the command line (VoiceCleanerCLI --batch ...): a console program, so the terminal waits
+    # for it and shows its progress; it shares _internal with VoiceCleaner.exe
+    executables.append(EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="VoiceCleanerCLI",
+        icon="assets/voicecleaner.ico",
+        version="build/version_info.txt" if Path("build/version_info.txt").exists() else None,
+        console=True,
+        upx=False,
+    ))
+
+coll = COLLECT(*executables, a.binaries, a.zipfiles, a.datas, strip=False, upx=False, name="VoiceCleaner")
 
 if MAC:
     sys.path.insert(0, ".")

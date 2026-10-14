@@ -49,7 +49,7 @@ from .widgets import DropZone, ElidedLabel, MetricsPanel, ThemeToggle, card, lab
 
 log = get_logger("ui")
 
-WAV_EXTENSIONS = (".wav", ".wave")
+from ..audio.decode import AUDIO_EXTENSIONS, FILE_FILTER  # noqa: E402
 MAX_RECENT = 10
 PREVIEW_SETTLE_MS = 600  # live preview starts this long after the last settings change
 PREVIEW_SECONDS = 10.0  # length of the live preview around the playhead
@@ -62,7 +62,7 @@ SHORTCUTS = [
     ("Home", "Back to the start"),
     ("Ctrl+Enter", "Enhance"),
     ("Ctrl+E", "Export enhanced audio"),
-    ("Ctrl+O", "Open a WAV file"),
+    ("Ctrl+O", "Open a recording or video"),
     ("R", "Record / stop recording"),
     ("L", "Loop the selection (or the whole recording)"),
     ("Ctrl+Shift+N", "New session"),
@@ -73,6 +73,7 @@ SHORTCUTS = [
     ("Ctrl+mouse wheel", "Zoom the waveform"),
     ("Double-click a slider", "Reset it to the preset's value"),
     ("E (Compile)", "Edit the selected take: X cut, S silence, Ctrl+Z undo"),
+    ("P (Batch)", "Preview on/off: a sample of the selected file; Space plays it, A / B compare"),
 ]
 
 
@@ -160,6 +161,18 @@ class MainWindow(QMainWindow):
         self.batch_panel.startRequested.connect(self._start_batch)
         self.batch_panel.cancelRequested.connect(self._cancel_batch)
         self.batch_panel.openRequested.connect(self._open_batch_result)
+        self.batch_panel.previewRequested.connect(self._batch_preview)
+        self.batch_panel.previewStopped.connect(self._stop_batch_preview)
+        self.batch_panel.player.stateChanged.connect(
+            lambda st: st == "playing" and self._pause_main_player())
+        self._bp_cache = None  # (path, mtime, audio, analysis) of the file last previewed in Batch
+        self._bp_task = None
+        self._bp_gen = 0
+        self._bp_timer = QTimer(self)
+        self._bp_timer.setSingleShot(True)
+        self._bp_timer.setInterval(700)
+        self._bp_timer.timeout.connect(lambda: self.batch_panel.preview_path
+                                       and self._batch_preview(self.batch_panel.preview_path))
         self.batch_panel.set_output_dir(config.batch_output_dir)
         # the Batch tab shows the same settings sidebar as Enhance (moved on tab change)
         self.batch_page = QWidget()
@@ -186,7 +199,8 @@ class MainWindow(QMainWindow):
         self._set_empty_state()
         self.record_panel.output_path_factory = lambda: self.session.recording_path()
         self.player.stateChanged.connect(lambda st: st == "playing" and (self.playback.pause(),
-                                                                         self.compile_panel.pause()))
+                                                                         self.compile_panel.pause(),
+                                                                         self.batch_panel.player.pause()))
         self.playback.set_session(self.session, sessions.sessions_root())
         self.compile_panel.set_session(self.session)
         self._refresh_session_recordings()
@@ -283,7 +297,7 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self) -> QMenu:
         m = QMenu(self)
-        m.addAction("Open WAV…", self.choose_file, QKeySequence.Open)
+        m.addAction("Open Recording…", self.choose_file, QKeySequence.Open)
         self.recent_menu = m.addMenu("Open Recent")
         self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
         self.export_action = m.addAction("Export Enhanced Audio…", lambda: self.export(), QKeySequence("Ctrl+E"))
@@ -473,6 +487,8 @@ class MainWindow(QMainWindow):
             self.record_panel.liveUpdate.connect(self._live_recording)
             self.record_panel.recordingChanged.connect(self._recording_changed)
             self.record_panel.finished.connect(self._recording_finished)
+            self.record_panel.countdownChanged.connect(self._record_countdown)
+            self.record_panel.restore_options(self.config.extra.get("record", {}))
             self.record_panel.failed.connect(self._error)
             v.addWidget(self.record_panel)
         wave = WaveformView(source, placeholder)
@@ -521,7 +537,7 @@ class MainWindow(QMainWindow):
         self.play_btn = QPushButton("▶")
         self.play_btn.setProperty("role", "round")
         self.play_btn.setToolTip("Play / Pause (Space)")
-        self.play_btn.clicked.connect(self.player.toggle_play)
+        self.play_btn.clicked.connect(self._toggle_main_play)
         self.play_btn.setCursor(Qt.PointingHandCursor)
         lay.addWidget(self.play_btn)
         self.stop_btn = QPushButton("■")
@@ -702,8 +718,9 @@ class MainWindow(QMainWindow):
             s.activated.connect(fn)
 
         sc(Qt.Key_Space, self._toggle_play_current)
-        sc(Qt.Key_A, lambda: self._activate("original"))
-        sc(Qt.Key_B, lambda: self._activate("enhanced"))
+        sc(Qt.Key_A, lambda: self._ab_shortcut("original"))
+        sc(Qt.Key_B, lambda: self._ab_shortcut("enhanced"))
+        sc(Qt.Key_P, lambda: self.tabs.currentWidget() is self.batch_page and self.batch_panel.toggle_preview())
         sc(Qt.Key_Home, lambda: self._seek(0.0))
         sc("Ctrl+Return", self.enhance)
         sc(Qt.Key_Escape, self._escape)
@@ -739,6 +756,7 @@ class MainWindow(QMainWindow):
             self._job_key = None
             self.speed_label.setText("")  # drop the elapsed-time line; callers may set a result line
         self.enhance_btn.setEnabled(not busy and self.audio is not None)
+        self.play_btn.setEnabled(not (busy and self._job_key == "enhance"))
         self.cancel_btn.setVisible(busy)
         self.progress.setVisible(busy)
         self.progress.setValue(0)
@@ -906,7 +924,7 @@ class MainWindow(QMainWindow):
     # ============================================================================ files
     def choose_file(self):
         start = self.config.last_open_dir or str(Path.home())
-        path, _ = QFileDialog.getOpenFileName(self, "Open WAV recording", start, "WAV audio (*.wav *.wave);;All files (*)")
+        path, _ = QFileDialog.getOpenFileName(self, "Open a recording", start, FILE_FILTER)
         if path:
             self.open_file(Path(path))
 
@@ -1002,6 +1020,15 @@ class MainWindow(QMainWindow):
         from ..audio.analyzer import FRAME_HOP_S
 
         a = self.analysis
+        pending, self._pending_room_tone = getattr(self, "_pending_room_tone", None), None
+        if pending is not None and Path(self.audio.info.path) == pending[0]:
+            region = (0.05, max(0.35, pending[1] - 0.05))  # the room tone recorded before speaking
+            if self._use_noise_profile(*region):
+                self._set_profile_note(f"Noise learned from the room tone ({region[1] - region[0]:.1f} s)")
+                self.status_label.setText("Ready. The room tone recorded first is the noise profile "
+                                          "(Clear Noise Profile to undo). Click Enhance.")
+                log.info("Noise profile from the recorded room tone %.2f-%.2f s", *region)
+                return
         region = noise_profile_mod.leading_noise_region(a.speech_mask, a.frame_level_db, FRAME_HOP_S)
         if region is None:
             return
@@ -1046,7 +1073,8 @@ class MainWindow(QMainWindow):
         if self.audio is None or self._task_running():
             return
         self._cancel_preview(wait=True)
-        self.player.pause() if self.player.active_source == "enhanced" else None
+        if self.player.state == "playing":
+            self.player.pause()  # nothing plays while the recording is being enhanced
         settings = self.settings_panel.current()
         audio, analysis, profile = self.audio, self.analysis, self.learned_profile
         self._begin_job("enhance", "Enhancing")
@@ -1104,6 +1132,9 @@ class MainWindow(QMainWindow):
     PAUSE_FIELDS = ("pause_shorten", "pause_min_s", "pause_keep_ms")
 
     def _settings_changed(self, s: ProcessingSettings):
+        if self.batch_panel.preview_on and self.batch_panel.preview_path is not None \
+                and self.tabs.currentWidget() is self.batch_page:
+            self._bp_timer.start()  # the batch sample follows the settings
         if self.result is not None and self._result_settings is not None:
             # pause shortening happens on export, so it never requires enhancing again
             now = {k: v for k, v in s.to_dict().items() if k not in self.PAUSE_FIELDS}
@@ -1146,6 +1177,8 @@ class MainWindow(QMainWindow):
 
     def _play_source(self, source: str):
         self._activate(source)
+        if self._enhancing:
+            return  # playback waits until enhancing is done
         if self.player.state != "playing":
             self.player.play()
 
@@ -1676,7 +1709,16 @@ class MainWindow(QMainWindow):
         if overview is not None and self.wave_orig.overview is not None:
             self.wave_enh.set_view(self.wave_orig.t0, self.wave_orig.t1)
 
+    def _record_countdown(self, seconds: int):
+        """Show the countdown big on the Original track."""
+        self.wave_orig.set_busy(f"Recording starts in {seconds}\u2026" if seconds > 0 else "")
+        if seconds > 0:
+            self.status_label.setText(f"Recording starts in {seconds}\u2026")
+
     def _recording_finished(self, result, mode: str, position: float, latency: float):
+        if mode == "new" and self.record_panel.last_room_tone:
+            # the quiet second at the start is the room tone: the noise profile, exactly
+            self._pending_room_tone = (Path(result.path), self.record_panel.last_room_tone)
         self.player.stop()
         self.record_toggle.setChecked(False)
         self._pending_warnings = list(result.warnings)
@@ -1820,7 +1862,8 @@ class MainWindow(QMainWindow):
 
     # ============================================================================ drag & drop
     def dragEnterEvent(self, e):
-        if any(u.toLocalFile().lower().endswith(WAV_EXTENSIONS) for u in e.mimeData().urls()):
+        if any(u.toLocalFile().lower().endswith(AUDIO_EXTENSIONS) or Path(u.toLocalFile()).is_dir()
+               for u in e.mimeData().urls()):
             e.acceptProposedAction()
             self.drop_zone.set_hover(True)
 
@@ -1832,10 +1875,11 @@ class MainWindow(QMainWindow):
         paths = [Path(u.toLocalFile()) for u in e.mimeData().urls() if u.isLocalFile()]
         dirs = [p for p in paths if p.is_dir()]
         for d in dirs:
-            paths.extend(sorted(d.glob("*.wav")))
-        wavs = [p for p in paths if p.suffix.lower() in WAV_EXTENSIONS]
+            paths.extend(sorted(q for q in d.iterdir() if q.suffix.lower() in AUDIO_EXTENSIONS))
+        wavs = [p for p in paths if p.suffix.lower() in AUDIO_EXTENSIONS]
         if not wavs:
-            self._error("Not a WAV file", "VoiceCleaner opens WAV recordings. Drop a .wav file.")
+            self._error("Not a recording", "VoiceCleaner opens recordings (WAV, MP3, M4A, FLAC, Opus, WMA ...) "
+                        "and the sound of video files (MP4, MOV, MKV, WebM ...).")
             return
         if len(wavs) == 1 and self.tabs.currentWidget() is not self.batch_page:
             self.tabs.setCurrentIndex(0)
@@ -2158,13 +2202,96 @@ class MainWindow(QMainWindow):
         elif self.tabs.widget(index) is self.compile_panel:
             self.compile_panel.ensure_populated()
 
+    def _batch_preview(self, path):
+        """Batch tab: a 10-second sample of ``path`` (the part with the most speech) with the
+        current settings, exactly as the batch would process it."""
+        from ..audio import loudness
+        from ..audio.analyzer import analyze
+        from ..audio.loader import load_wav
+        from ..audio.pipeline import best_preview_window
+        from ..audio.settings import smart_adapt
+
+        path = Path(path)
+        if self._bp_task is not None and self._bp_task.running:
+            self._bp_task.cancel()
+        self._bp_gen += 1
+        gen = self._bp_gen
+        settings = self.settings_panel.current()
+        smart = self.settings_panel.smart.isChecked()
+        cached = self._bp_cache
+        self.batch_panel.preview_busy(path)
+        self.activity.start("batch-preview", "Batch preview", self.batch_page)
+
+        def work(ctx):
+            mtime = path.stat().st_mtime
+            if cached and cached[0] == path and cached[1] == mtime:
+                audio, analysis = cached[2], cached[3]
+            else:
+                ctx.progress(0.05, "Reading the file...")
+                audio = load_wav(path)
+                ctx.check()
+                ctx.progress(0.2, "Analyzing...")
+                analysis = analyze(audio.samples, audio.sample_rate)
+            ctx.check()
+            s = smart_adapt(settings, analysis).settings if smart else settings
+            t0, t1 = best_preview_window(analysis)
+            sub = type("Sub", (), {"progress": lambda _s, f, m="": ctx.progress(0.3 + 0.7 * f, m),
+                                   "check": lambda _s: ctx.check()})()
+            pr = EnhancementPipeline(self._get_model_manager()).preview(audio, analysis, s, t0, t1, sub)
+            orig = np.asarray(audio.samples[pr.start_frame: pr.start_frame + pr.samples.shape[0]], np.float32)
+            lo, le = (loudness.integrated_loudness(x, audio.sample_rate) for x in (orig, pr.samples))
+            gain = float(10 ** ((le - lo) / 20)) if np.isfinite(lo) and np.isfinite(le) else 1.0
+            return path, mtime, audio, analysis, orig, pr, gain
+
+        def done(res):
+            p, mtime, audio, analysis, orig, pr, gain = res
+            self.activity.finish("batch-preview")
+            self._bp_cache = (p, mtime, audio, analysis)
+            if gen == self._bp_gen and self.batch_panel.preview_on:
+                self.batch_panel.show_preview(p, orig, pr.samples, pr.sample_rate, pr.window, min(gain, 8.0),
+                                              pr.processing_seconds)
+
+        def failed(_title, message, cancelled):
+            self.activity.finish("batch-preview", ok=False)
+            if gen == self._bp_gen and not cancelled:
+                self.batch_panel.preview_failed(message)
+
+        self._bp_task = run_task(work, self, on_success=done, on_error=failed,
+                                 on_progress=lambda f, m: self.activity.update("batch-preview", f, m))
+
+    def _stop_batch_preview(self):
+        self._bp_timer.stop()
+        self._bp_gen += 1  # a sample still rendering is dropped
+        if self._bp_task is not None and self._bp_task.running:
+            self._bp_task.cancel()
+        self.activity.finish("batch-preview")
+
+    def _ab_shortcut(self, source: str):
+        if self.tabs.currentWidget() is self.batch_page:
+            self.batch_panel.switch(source)  # the batch preview's A/B
+        else:
+            self._activate(source)
+
     def _toggle_play_current(self):
-        if self.tabs.currentWidget() is self.playback:
+        if self.tabs.currentWidget() is self.batch_page:
+            self.batch_panel.toggle_play()
+        elif self.tabs.currentWidget() is self.playback:
             self.playback.toggle_play()
         elif self.tabs.currentWidget() is self.compile_panel:
             self.compile_panel.toggle_play()
         else:
-            self.player.toggle_play()
+            self._toggle_main_play()
+
+    @property
+    def _enhancing(self) -> bool:
+        return self._job_key == "enhance"
+
+    def _toggle_main_play(self):
+        """Play / pause the Enhance tab; playback waits while the recording is being enhanced."""
+        if self._enhancing and self.player.state != "playing":
+            self.status_label.setText("Playback is paused while enhancing. Press Play again when it is done.")
+            return
+        self.player.toggle_play()
 
     def _pause_main_player(self):
         if self.player.state == "playing":
@@ -2411,6 +2538,7 @@ class MainWindow(QMainWindow):
         self.player.shutdown()
         self.playback.shutdown()
         self.compile_panel.shutdown()
+        self.batch_panel.shutdown()
         s = self.settings_panel.current()
         c = self.config
         c.window_geometry = bytes(self.saveGeometry().toHex()).decode()
@@ -2423,6 +2551,7 @@ class MainWindow(QMainWindow):
         c.extra["settings"] = s.to_dict()  # every control, restored at the next start
         c.extra["pauses"] = {"shorten": s.pause_shorten, "min_s": s.pause_min_s, "keep_ms": s.pause_keep_ms}
         c.extra["compile"] = self.compile_panel.options()
+        c.extra["record"] = self.record_panel.options()
         c.extra["eq_gains"] = list(s.eq_gains)
         c.extra["eq_tilt"] = s.eq_tilt
         c.extra["session_path"] = str(self.session.path)

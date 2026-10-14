@@ -15,7 +15,9 @@ from .config import APP_NAME, APP_VERSION, log_dir
 _configured = False
 
 
-def setup_logging(level: int = logging.INFO) -> logging.Logger:
+def setup_logging(level: int = logging.INFO, console: bool = True) -> logging.Logger:
+    """Log to the log file, and to the console when there is one and ``console`` (the
+    command line keeps its terminal for its own progress lines)."""
     global _configured
     root = logging.getLogger(APP_NAME)
     if _configured:
@@ -29,7 +31,7 @@ def setup_logging(level: int = logging.INFO) -> logging.Logger:
     file_handler.setFormatter(fmt)
     root.addHandler(file_handler)
 
-    if sys.stderr is not None:  # stderr is None in windowed PyInstaller builds
+    if console and sys.stderr is not None:  # stderr is None in windowed PyInstaller builds
         console = logging.StreamHandler(sys.stderr)
         console.setFormatter(fmt)
         root.addHandler(console)

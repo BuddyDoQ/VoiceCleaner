@@ -114,7 +114,7 @@ class AnalysisResult:
             out.append("No clear speech was detected. The file may contain only noise or music.")
         if self.is_clipped:
             out.append("The recording contains clipping (distortion from recording too loud). "
-                       "It can be softened but not fully repaired.")
+                       "VoiceCleaner rebuilds the clipped peaks (Advanced \u2192 Repair clipping).")
         if self.duration < 1.0:
             out.append("The recording is very short; automatic analysis is less reliable.")
         return out

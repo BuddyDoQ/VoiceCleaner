@@ -23,6 +23,7 @@ import numpy as np
 
 from . import loudness, noise_profile as noise_profile_mod, quality
 from .analyzer import FRAME_HOP_S, AnalysisResult, estimate_rt60, mask_to_regions
+from .declip import DeclipReport, declip
 from .dsp import analysis_fft_size, band_edges_bins, db, iter_power_frames
 from .compressor import Compressor, CompressorParams, GateParams, NoiseGate
 from .deesser import DeEsser, DeEsserParams
@@ -335,8 +336,18 @@ class EnhancementPipeline:
         buf_a = allocate(n, ch, disk)
         buf_b = allocate(n, ch, disk)
 
+        # 0. clipping repair: before any filter smears the flat tops
+        if s.declip and analysis.is_clipped:
+            rep = DeclipReport()
+            declip(x, rep, out=buf_b, progress=lambda f: prog("cleanup", 0.5 * f, "Repairing clipping..."),
+                   check=prog.check)
+            if rep.clipped_samples:
+                x = buf_b
+                buf_b = allocate(n, ch, disk)
+                info["stages"].append(f"clipping repair ({rep.clipped_samples / max(1, n * ch) * 100:.2f}% of samples)")
+
         # 1. cleanup filters
-        prog("cleanup", 0.0, "Removing rumble and hum...")
+        prog("cleanup", 0.5 if "clipping" in " ".join(info["stages"]) else 0.0, "Removing rumble and hum...")
         hp = s.highpass_hz or choose_highpass(s.lf_cleanup, analysis.lf_rumble_db, analysis.f0_low_hz)
         hum = analysis.hum.harmonics if (s.hum_removal and analysis.hum.detected) else []
         CleanupFilter(sr, CleanupParams(highpass_hz=hp, hum_freqs=hum)).process(x, out=buf_a)
@@ -575,3 +586,19 @@ class EnhancementPipeline:
             prog("limiter", (i + 1) / 3, "Limiting peaks...")
         prog("limiter", 1.0, "Limiting peaks...")
         return z
+
+
+def best_preview_window(analysis: AnalysisResult, length_s: float = 10.0) -> tuple[float, float]:
+    """The ``length_s`` stretch with the most speech (a fair sample of a whole recording);
+    the whole recording when it is shorter."""
+    total = analysis.duration
+    if total <= length_s or analysis.speech_mask.size == 0:
+        return 0.0, min(total, length_s)
+    n = max(1, int(round(length_s / FRAME_HOP_S)))
+    speech = np.concatenate([[0], np.cumsum(analysis.speech_mask.astype(np.int32))])
+    counts = speech[n:] - speech[:-n]
+    if counts.size == 0:
+        return 0.0, length_s
+    start = int(np.argmax(counts)) * FRAME_HOP_S
+    start = float(min(max(0.0, start), total - length_s))
+    return round(start, 2), round(start + length_s, 2)

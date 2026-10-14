@@ -185,3 +185,21 @@ def test_ai_pipeline_improves_noisy_speech(noisy, model_manager):
     assert any("AI" in st for st in result.stages)
     assert result.enhanced_metrics.snr_db > result.original_metrics.snr_db + 10
     assert np.all(np.isfinite(result.samples))
+
+
+def test_best_preview_window_picks_the_speech():
+    from app.audio.analyzer import FRAME_HOP_S
+    from app.audio.pipeline import best_preview_window
+
+    hop = FRAME_HOP_S
+    mask = np.zeros(int(60 / hop), bool)
+    mask[int(40 / hop):int(52 / hop)] = True  # speech from 40 s to 52 s of a 60 s file
+
+    class A:  # just what the function reads
+        duration = 60.0
+        speech_mask = mask
+
+    a, b = best_preview_window(A(), 10.0)
+    assert b - a == 10.0 and 40.0 <= a <= 42.0
+    A.duration, A.speech_mask = 6.0, mask[: int(6 / hop)]
+    assert best_preview_window(A(), 10.0) == (0.0, 6.0)  # shorter than the window: all of it

@@ -40,7 +40,7 @@ TITLE_ROLE = Qt.UserRole + 1  # teleprompter rows: "03 · Section · Take 2 of 3
 UNIT_ROLE = Qt.UserRole + 2  # teleprompter rows: the script unit id
 EDIT_KEY_ROLE = Qt.UserRole + 3  # the user's edits are saved under this name (a take keeps them once enhanced)
 ROW_HEIGHT = 64
-WAV = (".wav", ".wave")
+from ..audio.decode import AUDIO_EXTENSIONS as WAV, FILE_FILTER  # noqa: E402
 
 
 class TakeDelegate(QStyledItemDelegate):
@@ -153,7 +153,7 @@ class TakeDelegate(QStyledItemDelegate):
 
 
 class TakeList(QListWidget):
-    """Reorders by internal drag; also accepts WAV files dropped from Explorer."""
+    """Reorders by internal drag; also accepts recordings dropped from Explorer."""
 
     filesDropped = Signal(list)
     orderChanged = Signal()
@@ -598,7 +598,7 @@ class CompilePanel(QWidget):
 
     def _choose_files(self):
         start = str(self.session.exports_dir) if self.session else ""
-        files, _ = QFileDialog.getOpenFileNames(self, "Add takes", start, "WAV audio (*.wav *.wave)")
+        files, _ = QFileDialog.getOpenFileNames(self, "Add takes", start, FILE_FILTER)
         self.add_files([Path(f) for f in files])
 
     def paths(self) -> list[str]:

@@ -47,6 +47,7 @@ class ProcessingSettings:
     room_reduction: float = 0.3
     # noise reduction
     use_ai: bool = True
+    declip: bool = True  # rebuild clipped peaks when the analysis finds clipping
     noise_floor_offset_db: float = 0.0  # bias of the learned/estimated noise floor
     spectral_subtraction: float = 1.75  # over-subtraction factor of the profile denoiser
     max_attenuation_db: float = 24.0  # cap on noise reduction; keeps natural room tone

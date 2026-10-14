@@ -11,3 +11,5 @@ models/*/
 *.part
 release/
 .wix/
+third_party/
+ffmpeg/

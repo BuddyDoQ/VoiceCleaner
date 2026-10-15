@@ -228,6 +228,14 @@ def render_take(take: Take) -> np.ndarray:
     return x
 
 
+def apply_edits(samples: np.ndarray, sr: int, saved: list) -> np.ndarray:
+    """``samples`` with the user's edits (seconds, as saved) applied: the whole recording,
+    nothing trimmed. Used when the Enhance tab exports."""
+    take = Take(Path(""), samples, sr, 0, samples.shape[0])
+    take.edits = edits_from_seconds(take, saved)
+    return render_take(take) if take.edits else samples
+
+
 def _convert(x: np.ndarray, sr_from: int, sr_to: int, channels: int) -> np.ndarray:
     if sr_from != sr_to:
         g = gcd(sr_from, sr_to)

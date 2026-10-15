@@ -1,7 +1,9 @@
-"""Edit one take of the compilation: cut out or silence regions the automatic trimming
-missed (a pop, a click, a stumble, a pause that was not detected).
+"""Edit one take of the compilation, or the recording open in the Enhance tab: cut out or
+silence regions the automatic trimming missed (a pop, a click, a stumble, a pause that was
+not detected).
 
-The original file is never changed; the edits are applied when the compilation is built.
+The original file is never changed; the edits are applied when the compilation is built,
+or when the Enhance tab exports.
 Cut removes the region (crossfaded, so the join is smooth); Silence keeps the timing
 and fades the region to silence.
 """
@@ -99,9 +101,11 @@ class TakeEditView(WaveformView):
 class TakeEditor(QDialog):
     """Select a region and Cut or Silence it. Edits can be clicked and removed."""
 
-    def __init__(self, take: Take, title: str, parent=None):
+    def __init__(self, take: Take, title: str, parent=None, target: str = "compilation"):
+        """``target`` is what the edits end up in: "compilation", or "export" (Enhance tab)."""
         super().__init__(parent)
         self.take = take
+        self.target = target
         self.setWindowTitle(f"Edit Take — {title}")
         self.resize(1100, 470)
         self._history: list[list] = []
@@ -117,7 +121,9 @@ class TakeEditor(QDialog):
         v.addWidget(label(
             "Drag across a pop, click or unwanted pause, then Cut it out or Silence it. Click an edit to pick it; "
             f"Delete removes it. {shortcut_text('Ctrl')}+wheel zooms, the wheel scrolls. "
-            "The original file is not changed.", "muted", wrap=True))
+            + ("The edits apply to the Original and Enhanced tracks alike, and to the export. "
+               if target == "export" else "")
+            + "The original file is not changed.", "muted", wrap=True))
         self.view = TakeEditView(take)
         self.view.edits = list(take.edits)
         self.view.set_overview(WaveformOverview.compute(take.samples, take.sample_rate))
@@ -130,7 +136,7 @@ class TakeEditor(QDialog):
         row = QHBoxLayout()
         self.play_btn = self._btn("▶ Play", self.toggle_play, "Play the selection, or from the playhead (Space)")
         self.result_btn = self._btn("Hear Result", self.play_result,
-                                    "Play the take as it will sound in the compilation (R)")
+                                    f"Play the take as it will sound in the {target} (R)")
         row.addWidget(self.play_btn)
         row.addWidget(self.result_btn)
         row.addSpacing(16)
@@ -224,7 +230,7 @@ class TakeEditor(QDialog):
         t, sr = self.take, self.take.sample_rate
         preview = Take(t.path, t.samples, sr, t.start, t.end, t.lufs, t.overview, t.cuts, self.view.edits)
         n = len(self.view.edits)
-        msg = (f"{format_duration(t.duration)} → {format_duration(preview.final_duration)} in the compilation"
+        msg = (f"{format_duration(t.duration)} → {format_duration(preview.final_duration)} in the {self.target}"
                f"   ·   {n} edit{'s' if n != 1 else ''}")
         if preview.edit_seconds:
             msg += f", −{preview.edit_seconds:.2f} s cut"
@@ -314,7 +320,7 @@ class TakeEditor(QDialog):
         super().done(r)
 
 
-def edit_take(take: Take, title: str, parent=None) -> list | None:
+def edit_take(take: Take, title: str, parent=None, target: str = "compilation") -> list | None:
     """Show the editor; the new edits, or None when cancelled."""
-    dlg = TakeEditor(take, title or Path(take.path).name, parent)
+    dlg = TakeEditor(take, title or Path(take.path).name, parent, target)
     return list(dlg.edits) if dlg.exec() == QDialog.Accepted else None

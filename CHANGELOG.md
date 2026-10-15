@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.6
+
+- **Edit Take in the Enhance tab.** Click *Edit Take…* above the Original track (or right-click
+  either track, or press E) to cut out a pop, a click or a stumble, or silence it, with the
+  same editor as Compile. The edits are the same for both tracks: the cut parts are marked on
+  both waveforms, both tracks skip them while playing (and play silenced parts silent), so
+  A/B still compares the same audio. Export writes the enhanced audio with the edits. The
+  original file is never changed; the edits are kept with the session and are the same ones
+  Compile uses for the take, so a take edited in one tab is edited in the other. *Clear
+  Edits* in the same menu removes them.
+- **The playhead goes to the start of a selection.** After dragging across a waveform in the
+  Enhance tab, the playhead is at the start of the selection, so Play starts right there.
+- The Original track's header no longer has its own Teleprompter button, making room for
+  Edit Take. The teleprompter opens from the button in the top bar, the start page, the menu
+  or Ctrl+T, as before.
+- The grey line drawn along the top of the tabs is gone; the header now meets the tabs in the
+  theme's own colours, dark and light.
+
 ## 1.1.5
 
 - **Quieter, even pauses.** A new *Pause clean-up* stage (Advanced → Noise reduction) turns

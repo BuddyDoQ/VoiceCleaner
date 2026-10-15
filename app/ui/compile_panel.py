@@ -223,6 +223,7 @@ class CompilePanel(QWidget):
     reenhanceRequested = Signal(list, str)  # row paths, preset name ("" = the current settings)
     openInEnhanceRequested = Signal(str)  # row path: its original recording, to fine-tune in the Enhance tab
     playStarted = Signal()
+    editsChanged = Signal()  # the user's edits of a take were changed and saved
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -450,9 +451,18 @@ class CompilePanel(QWidget):
         self.session = session
         if changed:
             self._reset_for_new_session()
-        self.edits = load_edits(session.path if session is not None else None)
+        self.reload_edits(rebuild=False)
+
+    def reload_edits(self, rebuild: bool = True):
+        """Read the session's edits again (the Enhance tab edits the same recordings)."""
+        self.edits = load_edits(self.session.path if self.session is not None else None)
+        changed = False
         for p, t in self.takes.items():
-            t.edits = edits_from_seconds(t, self.edits.get(self._edit_key(p)))
+            edits = edits_from_seconds(t, self.edits.get(self._edit_key(p)))
+            if edits != t.edits:
+                t.edits, changed = edits, True
+        if changed and rebuild:
+            self._changed()
 
     def _reset_for_new_session(self):
         """Another session was opened: its takes replace the previous session's."""
@@ -774,6 +784,7 @@ class CompilePanel(QWidget):
         self.edits[self._edit_key(path)] = edits_to_seconds(take)
         save_edits(self.session.path if self.session is not None else None, self.edits)
         self._changed()
+        self.editsChanged.emit()
 
     def _remove_path(self, p: str):
         for i in range(self.list.count()):

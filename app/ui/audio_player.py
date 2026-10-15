@@ -20,6 +20,7 @@ log = get_logger("player")
 SOURCES = ("original", "enhanced")
 SWITCH_FADE_S = 0.012
 LOOP_FADE_S = 0.004  # gentle fade at both loop ends so the jump back does not click
+MUTE_FADE_S = 0.005  # a silenced region fades out and back in, as it does when exported
 # CoreAudio honours latency="low" with callbacks of a few frames (15 frames = 0.7 ms at
 # 22.05 kHz), far too short for a Python callback: any GIL pause becomes a dropout.
 # ~20 ms blocks keep playback clean; the A/B switch still lands within one block.
@@ -50,6 +51,9 @@ class AudioPlayer(QObject):
         self._ended = False
         self._loop: tuple[int, int] | None = None  # frames [start, end) played over and over
         self._overlay: dict[str, tuple[int, np.ndarray]] = {}  # source -> (start frame, samples) laid over it
+        self._edit_s: list = []  # the user's edits on both sources: (start s, end s, "cut" | "mute")
+        self._cuts: list[tuple[int, int]] = []  # frames skipped while playing
+        self._mutes: list[tuple[int, int]] = []  # frames played silent
         self._timer = QTimer(self)
         self._timer.setInterval(33)
         self._timer.timeout.connect(self._tick)
@@ -61,7 +65,9 @@ class AudioPlayer(QObject):
             if sr is not None:
                 if sr != self._sr and self._stream is not None:
                     self._close_stream()
-                self._sr = sr
+                if sr != self._sr:
+                    self._sr = sr
+                    self._edit_frames()
             if name == self._active and samples is None:
                 self._active = "original"
         if all(b is None for b in self._buffers.values()):
@@ -75,6 +81,27 @@ class AudioPlayer(QObject):
                 self._overlay.pop(name, None)
             else:
                 self._overlay[name] = (int(start_frame), samples)
+
+    def set_edits(self, edits: list | None):
+        """Play both sources with the user's edits, ``(start s, end s, kind)``: "cut" regions
+        are skipped and "mute" regions are silent. The timeline is not changed."""
+        with self._lock:
+            self._edit_s = [tuple(e) for e in edits or []]
+            self._edit_frames()
+
+    def _edit_frames(self):
+        spans = {"cut": [], "mute": []}
+        for a, b, kind in self._edit_s:
+            a, b = int(round(a * self._sr)), int(round(b * self._sr))
+            if b > a and kind in spans:
+                spans[kind].append((a, b))
+        cuts = []
+        for a, b in sorted(spans["cut"]):
+            if cuts and a <= cuts[-1][1]:
+                cuts[-1] = (cuts[-1][0], max(cuts[-1][1], b))
+            else:
+                cuts.append((a, b))
+        self._cuts, self._mutes = cuts, sorted(spans["mute"])
 
     def has_source(self, name: str) -> bool:
         return self._buffers.get(name) is not None
@@ -240,10 +267,62 @@ class AudioPlayer(QObject):
                 pass
             self._stream = None
 
-    def _read(self, name: str, pos: int, frames: int) -> np.ndarray:
+    def _positions(self, pos: int, frames: int) -> tuple[np.ndarray, int]:
+        """The frames to play next from ``pos``, wrapping at the loop end and jumping over
+        cut regions (-1: nothing to play), and the position after them."""
+        loop, cuts = self._loop, self._cuts
+        if loop is None and not cuts:
+            return np.arange(pos, pos + frames), pos + frames
+        idx = np.full(frames, -1, np.int64)
+        n, p, wraps = 0, pos, 0
+        while n < frames:
+            if loop is not None and not (loop[0] <= p < loop[1]):
+                p, wraps = loop[0], wraps + 1
+                if wraps > 2:
+                    break  # the whole loop is cut out
+            for a, b in cuts:
+                if a <= p < b:
+                    p = b
+            if loop is not None and p >= loop[1]:
+                continue
+            stop = p + frames - n
+            if loop is not None:
+                stop = min(stop, loop[1])
+            nxt = next((a for a, _b in cuts if a > p), None)
+            if nxt is not None:
+                stop = min(stop, nxt)
+            idx[n:n + stop - p] = np.arange(p, stop)
+            n, p = n + stop - p, stop
+        return idx, p
+
+    def _envelope(self, idx: np.ndarray) -> np.ndarray | None:
+        """Short fades where playback jumps (both loop ends, both sides of a cut), so the
+        jump never clicks. None when there is no jump nearby."""
+        k = max(1, int(LOOP_FADE_S * self._sr))
+        lo, hi = int(idx.min()), int(idx.max())
+        env = None
         if self._loop is not None:
-            return self._read_loop(name, pos, frames)
-        return self._read_plain(name, pos, frames)
+            a, b = self._loop
+            env = np.minimum(np.clip((idx - a) / k, 0, 1), np.clip((b - 1 - idx) / k, 0, 1))
+        for a, b in self._cuts:
+            if a - k > hi or b + k < lo:
+                continue
+            g = np.where(idx < a, np.clip((a - 1 - idx) / k, 0, 1), np.clip((idx - b) / k, 0, 1))
+            env = g if env is None else env * g
+        if env is not None:
+            env[idx < 0] = 0.0
+        return None if env is None else env.astype(np.float32)
+
+    def _read(self, name: str, idx: np.ndarray) -> np.ndarray:
+        """Source ``name`` at the frames ``idx`` (runs of consecutive frames)."""
+        frames = idx.shape[0]
+        out = np.zeros((frames, 2), dtype=np.float32)
+        start = 0
+        for end in [*(np.flatnonzero(np.diff(idx) != 1) + 1), frames]:
+            if idx[start] >= 0:
+                out[start:end] = self._read_plain(name, int(idx[start]), int(end) - start)
+            start = int(end)
+        return out
 
     def _read_plain(self, name: str, pos: int, frames: int) -> np.ndarray:
         buf = self._buffers.get(name)
@@ -262,46 +341,49 @@ class AudioPlayer(QObject):
             out[: chunk.shape[0]] = chunk  # broadcast mono to both speakers
         else:
             out[: chunk.shape[0]] = chunk[:, :2]
+        gain = self._mute_gain(pos, frames)
+        if gain is not None:
+            out *= gain[:, None]
         return out * self._gains[name]
 
-    def _read_loop(self, name: str, pos: int, frames: int) -> np.ndarray:
-        """``frames`` samples of the loop starting at ``pos``, wrapping at the loop end,
-        with a short fade at both ends of the loop."""
-        a, b = self._loop
-        idx = a + (pos - a + np.arange(frames)) % (b - a)
-        out = np.zeros((frames, 2), dtype=np.float32)
-        start = 0
-        while start < frames:  # contiguous runs between wraps
-            run_end = start + 1
-            while run_end < frames and idx[run_end] == idx[run_end - 1] + 1:
-                run_end += 1
-            out[start:run_end] = self._read_plain(name, int(idx[start]), run_end - start)
-            start = run_end
-        k = max(1, int(LOOP_FADE_S * self._sr))
-        env = np.minimum(np.clip((idx - a) / k, 0, 1), np.clip((b - 1 - idx) / k, 0, 1)).astype(np.float32)
-        return out * env[:, None]
+    def _mute_gain(self, pos: int, frames: int) -> np.ndarray | None:
+        """The gain of the silenced regions over ``frames`` from ``pos``, None when none is
+        there. Each region fades out over its first 5 ms and back in over its last."""
+        gain = None
+        for a, b in self._mutes:
+            if b <= pos or a >= pos + frames:
+                continue
+            if gain is None:
+                gain = np.ones(frames, np.float32)
+            k = max(1, min(int(MUTE_FADE_S * self._sr), (b - a) // 2))
+            i = np.arange(max(a, pos), min(b, pos + frames))
+            d = np.clip(np.minimum(i - a, b - 1 - i) / k, 0, 1)
+            gain[i - pos] *= (0.5 + 0.5 * np.cos(np.pi * d)).astype(np.float32)
+        return gain
 
     def _callback(self, outdata, frames, _time, _status):
         with self._lock:
             pos = self._pos
-            data = self._read(self._active, pos, frames)
+            idx, nxt = self._positions(pos, frames)
+            data = self._read(self._active, idx)
             if self._fade_from is not None:
                 fade_len = int(SWITCH_FADE_S * self._sr)
-                old = self._read(self._fade_from, pos, frames)
-                idx = np.arange(self._fade_pos, self._fade_pos + frames)
-                w = np.clip(idx / fade_len, 0, 1).astype(np.float32)[:, None]
+                old = self._read(self._fade_from, idx)
+                i = np.arange(self._fade_pos, self._fade_pos + frames)
+                w = np.clip(i / fade_len, 0, 1).astype(np.float32)[:, None]
                 data = data * w + old * (1 - w)
                 self._fade_pos += frames
                 if self._fade_pos >= fade_len:
                     self._fade_from = None
+            env = self._envelope(idx)
+            if env is not None:
+                data *= env[:, None]
             np.clip(data, -1.0, 1.0, out=data)
             outdata[:] = data
             buf = self._buffers.get(self._active)
+            self._pos = nxt
             if self._loop is not None:
-                a, b = self._loop
-                self._pos = a + (pos - a + frames) % (b - a)
                 return
-            self._pos = pos + frames
             if buf is None or self._pos >= buf.shape[0]:
                 self._ended = True
                 import sounddevice as sd

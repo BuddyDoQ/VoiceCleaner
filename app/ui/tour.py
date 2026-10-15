@@ -120,6 +120,14 @@ WHATS_NEW = [
          "A third of a second of steady noise before the first word is now enough for VoiceCleaner "
          "to learn your background noise, so short takes get cleaned more firmly too.",
          tab=0, version="1.1.5"),
+    Step("Edit the take here too",
+         "Edit Take (or press E) cuts out a pop or a stumble, or "
+         "silence it. Both tracks play with the edits, and Export uses them.",
+         tab=0, target=lambda w: _visible(w.edit_btn), version="1.1.6"),
+    Step("Selections start the playhead",
+         "When you drag across the waveform, the playhead jumps to the start of the selection, "
+         "so Play starts right there.",
+         tab=0, target=lambda w: _visible(w.wave_orig), version="1.1.6"),
 ]
 
 

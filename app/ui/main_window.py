@@ -72,7 +72,8 @@ SHORTCUTS = [
     ("Ctrl+/", "This list"),
     ("Ctrl+mouse wheel", "Zoom the waveform"),
     ("Double-click a slider", "Reset it to the preset's value"),
-    ("E (Compile)", f"Edit the selected take: X cut, S silence, {shortcut_text('Ctrl+Z')} undo"),
+    ("E", f"Edit the take (Enhance) or the selected take (Compile): X cut, S silence, "
+          f"{shortcut_text('Ctrl+Z')} undo"),
     ("P (Batch)", "Preview on/off: a sample of the selected file; Space plays it, A / B compare"),
 ]
 
@@ -98,6 +99,9 @@ class MainWindow(QMainWindow):
         self._exported_result = None  # the enhanced result last exported (to warn before discarding others)
         self._after_export = None  # runs after the Enhance tab's export succeeds (e.g. switch session)
         self._compile_link = None  # (recording, enhanced file, Compile row) when opened from Compile
+        self.edits: list = []  # the user's edits of the open recording, (start s, end s, kind), on both tracks
+        self._edits_key: tuple | None = None  # (session folder, key) the edits are saved under
+        self._exported_edits: list = []  # the edits the last export was made with
         self._tour = None  # the Getting Started / What's New overlay, while shown
         from . import wheel_guard
 
@@ -155,6 +159,7 @@ class MainWindow(QMainWindow):
         self.compile_panel.reenhanceRequested.connect(self._reenhance_takes)
         self.compile_panel.openInEnhanceRequested.connect(self.open_take_in_enhance)
         self.compile_panel.playStarted.connect(self._compile_play_started)
+        self.compile_panel.editsChanged.connect(self._load_edits)
         self.playback.addToCompile.connect(self._add_to_compile)
         self.tabs.addTab(self.compile_panel, "COMPILE")
         self.batch_panel = BatchPanel()
@@ -192,6 +197,9 @@ class MainWindow(QMainWindow):
         self._job_key: str | None = None
         self._job_failed = False
         self.tabs.tabBar().setStyleSheet("QTabBar { margin-left: 18px; }")
+        # no base frame: in document mode Fusion draws it as a grey line along the top of the
+        # tabs that ignores the theme (the line under the tabs comes from the stylesheet)
+        self.tabs.tabBar().setDrawBase(False)
         root.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
 
@@ -421,6 +429,9 @@ class MainWindow(QMainWindow):
         for wv in (self.wave_orig, self.wave_enh):
             wv.seekRequested.connect(self._seek)
             wv.viewChanged.connect(self._sync_view)
+            wv.selectionFinished.connect(lambda sel: self._seek(sel[0]))  # the playhead goes to its start
+            wv.setContextMenuPolicy(Qt.CustomContextMenu)
+            wv.customContextMenuRequested.connect(lambda pos, w=wv: self._wave_menu(w, pos))
         # one selection shared by both tracks: drag on either to loop or to learn noise
         self.wave_orig.selectionChanged.connect(self._selection_changed)
         self.wave_enh.selectionChanged.connect(self._selection_changed)
@@ -456,11 +467,16 @@ class MainWindow(QMainWindow):
             self.record_toggle.toggled.connect(self._show_record_panel)
             reserve_bold_width(self.record_toggle)  # bold and red while the recorder is open
             head.addWidget(self.record_toggle)
-            prompter = QPushButton("\u25a4  Teleprompter")
-            prompter.setCursor(Qt.PointingHandCursor)
-            prompter.setToolTip(f"Read a script while it records, one take per section ({shortcut_text('Ctrl+T')})")
-            prompter.clicked.connect(self.open_teleprompter)
-            head.addWidget(prompter)
+            self.edit_btn = QPushButton("✂  Edit Take…")
+            self.edit_btn.setCursor(Qt.PointingHandCursor)
+            self.edit_btn.setToolTip("Cut out or silence pops, clicks and pauses (E).\n"
+                                     "The edits apply to both tracks and to the export.")
+            self.edit_btn.clicked.connect(self.edit_take)
+            self.edit_btn.setEnabled(False)
+            # one width with or without the edit count, so the header does not move
+            self.edit_btn.setMinimumWidth(
+                self.edit_btn.fontMetrics().horizontalAdvance("✂  Edit Take… · 99") + 36)
+            head.addWidget(self.edit_btn)
         play = QPushButton("▶  Play")
         play.setProperty("role", "ghost")
         play.setToolTip(f"Play the {source} audio")
@@ -733,6 +749,7 @@ class MainWindow(QMainWindow):
         if QKeySequence(QKeySequence.Redo) != QKeySequence("Ctrl+Shift+Z"):
             sc("Ctrl+Shift+Z", self._redo_shortcut)
         sc(Qt.Key_L, lambda: self.audio is not None and self.loop_btn.toggle())
+        sc(Qt.Key_E, self._edit_shortcut)
 
     # ============================================================================ state
     def _set_empty_state(self):
@@ -768,6 +785,7 @@ class MainWindow(QMainWindow):
         self.update_take_btn.setEnabled(not busy and has_result)
         self.export_action.setEnabled(not busy and has_result)
         self.learn_btn.setEnabled(not busy and self.audio is not None)
+        self.edit_btn.setEnabled(not busy and self.audio is not None)
 
     def _on_progress(self, frac: float, message: str):
         self.progress.setValue(int(frac * 1000))
@@ -1008,6 +1026,7 @@ class MainWindow(QMainWindow):
         self.metrics.set_notes(self.settings_panel.auto_notes)
         self.stack.setCurrentIndex(1)
         self.record_panel.set_original(True, audio.duration)
+        self._load_edits()
         self._remember_recent(info.path)
         self._busy(False, "Ready. Adjust settings if you like, then click Enhance.")
         self.speed_label.setText(f"{format_duration(info.duration)} of audio • analyzed automatically")
@@ -1352,6 +1371,7 @@ class MainWindow(QMainWindow):
         if self.audio is not None and Path(self.audio.info.path) == raw:
             self._compile_link = (raw, self._enhanced_target(row, raw), row)
             self.update_take_btn.setVisible(True)
+            self._load_edits()  # the edits of the Compile row
             self.tabs.setCurrentIndex(0)
             return
         if self._confirm_leave_recording(go, "open this take"):
@@ -1541,6 +1561,98 @@ class MainWindow(QMainWindow):
             return False
         return box.clickedButton() is old
 
+    # ============================================================================ take edits
+    def _edits_location(self) -> tuple | None:
+        """Where the open recording's edits are saved: the session folder and the key Compile
+        uses for the take, so both tabs share them."""
+        if self.audio is None or self.session is None:
+            return None
+        if self._compile_link is not None:
+            return self.session.path, self.compile_panel._edit_key(str(self._compile_link[2]))
+        return self.session.path, Path(self.audio.info.path).name
+
+    def _load_edits(self):
+        """Show the saved edits of the open recording (once it is open, or after they were
+        changed in Compile)."""
+        from ..audio.compile import load_edits
+
+        self._edits_key = self._edits_location()
+        edits = load_edits(self._edits_key[0]).get(self._edits_key[1], []) if self._edits_key else []
+        dur = self.audio.duration if self.audio is not None else 0.0
+        self._show_edits([(a, min(b, dur), k) for a, b, k in edits if min(b, dur) > a])
+
+    def _show_edits(self, edits: list):
+        self.edits = [tuple(e) for e in edits]
+        for wv in (self.wave_orig, self.wave_enh):
+            wv.edit_regions = list(self.edits)
+            wv.update()
+        self.player.set_edits(self.edits)
+        n = len(self.edits)
+        self.edit_btn.setText("✂  Edit Take…" + (f" · {n}" if n else ""))
+
+    def _set_edits(self, edits: list):
+        """New edits for the open recording: drawn on both tracks, played, saved with the
+        session (Compile uses them too) and applied when exporting."""
+        from ..audio.compile import load_edits, save_edits
+
+        self._show_edits(edits)
+        if self._edits_key is not None:
+            folder, key = self._edits_key
+            saved = load_edits(folder)
+            saved[key] = [[round(a, 4), round(b, 4), k] for a, b, k in self.edits]
+            save_edits(folder, saved)
+            self.compile_panel.reload_edits()
+        n = len(self.edits)
+        cut = sum(b - a for a, b, k in self.edits if k == "cut")
+        if n:
+            self.status_label.setText(f"{n} edit{'s' if n != 1 else ''}" + (f", {cut:.2f} s cut" if cut else "")
+                                      + ". Export uses them.")
+        else:
+            self.status_label.setText("No edits.")
+
+    def _edit_shortcut(self):
+        if self.tabs.currentIndex() == 0:
+            self.edit_take()
+        elif self.tabs.currentWidget() is self.compile_panel:
+            self.compile_panel.edit_selected()
+
+    def edit_take(self):
+        """Edit Take: cut out or silence parts of the recording. The editor shows the enhanced
+        track when there is one; the same edits apply to the original."""
+        from ..audio.compile import Take, edits_from_seconds, edits_to_seconds
+        from .take_editor import edit_take
+
+        if self.audio is None or self.record_panel.recording:
+            return
+        self._pause_main_player()
+        if self.result is not None:
+            samples, sr, which = self.result.samples, self.result.sample_rate, "Enhanced"
+        else:
+            samples, sr, which = self.audio.samples, self.audio.sample_rate, "Original"
+        take = Take(Path(self.audio.info.path), samples, sr, 0, samples.shape[0])
+        take.edits = edits_from_seconds(take, self.edits)
+        before = list(take.edits)
+        edits = edit_take(take, f"{Path(self.audio.info.path).name} \u00b7 {which}", self, target="export")
+        if edits is None or edits == before:
+            return
+        take.edits = edits
+        self._set_edits(edits_to_seconds(take))
+
+    def _wave_menu(self, wave: WaveformView, pos):
+        if self.audio is None:
+            return
+        m = QMenu(self)
+        ed = m.addAction("\u2702 Edit Take\u2026  (E)")
+        ed.setEnabled(not self.record_panel.recording)
+        ed.triggered.connect(self.edit_take)
+        clear = m.addAction("Clear Edits")
+        clear.setEnabled(bool(self.edits))
+        clear.triggered.connect(lambda: self._set_edits([]))
+        if self.selection:
+            m.addSeparator()
+            m.addAction("Clear Selection").triggered.connect(lambda: self._selection_changed(None))
+        m.exec(wave.mapToGlobal(pos))
+
     # ============================================================================ loop
     def _update_loop(self):
         """Loop the selection, or the whole recording without one, while Loop is on."""
@@ -1689,6 +1801,7 @@ class MainWindow(QMainWindow):
         self.export_btn.setEnabled(not recording and self.result is not None)
         self.export_action.setEnabled(not recording and self.result is not None)
         self.learn_btn.setEnabled(not recording and self.audio is not None)
+        self.edit_btn.setEnabled(not recording and self.audio is not None)
         self.drop_zone.setEnabled(not recording)
         self.tabs.tabBar().setEnabled(not recording)
         self.setAcceptDrops(not recording)
@@ -1769,7 +1882,7 @@ class MainWindow(QMainWindow):
         self.config.output_format = v["format"]
         self.config.output_bit_depth = v["bit_depth"]
         self.config.output_sample_rate = v["sample_rate"]
-        result, source = self.result, self.audio.info.path
+        result, source, edits = self.result, self.audio.info.path, list(self.edits)
         pauses = self.settings_panel.current().pause_settings()
         self._begin_job("export", "Exporting")
         self._busy(True, "Exporting...")
@@ -1777,11 +1890,16 @@ class MainWindow(QMainWindow):
         def work(ctx):
             prog = lambda f: ctx.progress(f, "Exporting...")  # noqa: E731
             samples = result.samples
+            if edits:
+                from ..audio.compile import apply_edits
+
+                ctx.progress(0.0, "Applying your edits...")
+                samples = apply_edits(samples, result.sample_rate, edits)
             if pauses.active:
                 from ..audio.pauses import shorten_pauses
 
                 ctx.progress(0.0, "Shortening long pauses...")
-                samples, removed = shorten_pauses(result.samples, result.sample_rate, pauses)
+                samples, removed = shorten_pauses(samples, result.sample_rate, pauses)
                 log.info("Shortened long pauses on export: -%.1f s", removed)
             if v["format"] == "mp3":
                 return export_mp3(samples, result.sample_rate, v["path"], v["mp3_quality"], v["sample_rate"],
@@ -1791,6 +1909,7 @@ class MainWindow(QMainWindow):
 
         def saved(path):
             self._exported_result = result
+            self._exported_edits = edits
             self._exported(path)
             if callable(then):
                 then()
@@ -1800,8 +1919,9 @@ class MainWindow(QMainWindow):
 
     @property
     def unexported_result(self) -> bool:
-        """An enhanced version exists that has not been exported."""
-        return self.result is not None and self.result is not self._exported_result
+        """An enhanced version exists that has not been exported (or not with these edits)."""
+        return self.result is not None and (self.result is not self._exported_result
+                                            or self.edits != self._exported_edits)
 
     @property
     def _reveal_after_export(self) -> bool:
@@ -2057,6 +2177,8 @@ class MainWindow(QMainWindow):
         self._exported_result = None
         self._compile_link = None
         self.update_take_btn.setVisible(False)
+        self._edits_key = None
+        self._show_edits([])
         self.learned_profile = None
         self.selection = None
         self._enh_overview = None

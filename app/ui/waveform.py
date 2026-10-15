@@ -78,6 +78,7 @@ class WaveformOverview:
 class WaveformView(QWidget):
     seekRequested = Signal(float)
     selectionChanged = Signal(object)  # (start, end) seconds or None
+    selectionFinished = Signal(object)  # the mouse was released on a selection: (start, end)
     viewChanged = Signal(float, float)  # visible (t0, t1)
     activated = Signal()
     MIN_SELECTION_S = 0.05  # shorter drags are dropped
@@ -93,6 +94,7 @@ class WaveformView(QWidget):
         self.highlight_regions: list[tuple[float, float]] = []
         self.loop_region: tuple[float, float] | None = None  # drawn as a looped passage
         self.preview_region: tuple[float, float] | None = None  # live preview of new settings
+        self.edit_regions: list[tuple[float, float, str]] = []  # the user's edits: (start, end, "cut" | "mute") s
         self.active = False
         self.busy_text = ""
         self.busy_fraction: float | None = None  # progress shown with busy_text (None = no bar)
@@ -286,6 +288,9 @@ class WaveformView(QWidget):
         p.setBrush(core)
         p.drawPath(rpath)
 
+        if self.edit_regions:
+            self._draw_edits(p, r)
+
         if self.live is not None:
             self._draw_live(p, r)
 
@@ -306,6 +311,25 @@ class WaveformView(QWidget):
 
         if self.busy_text:
             self._draw_busy(p, r, dim=True)
+
+    def _draw_edits(self, p: QPainter, r: QRectF):
+        """Cut regions in red (left out when played and exported), silenced ones in grey."""
+        f = QFont(self.font())
+        f.setPointSizeF(theme.pt(7.5))
+        f.setBold(True)
+        p.setFont(f)
+        for a, b, kind in self.edit_regions:
+            xa, xb = max(r.left(), self._t_to_x(a)), min(r.right(), self._t_to_x(b))
+            if xb <= xa:
+                continue
+            color = theme.RECORD if kind == "cut" else theme.MUTED
+            box = QRectF(xa, r.top(), max(1.5, xb - xa), r.height())
+            p.fillRect(box, theme.qcolor(color, 70 if kind == "cut" else 90))
+            p.fillRect(QRectF(box.left(), r.top(), box.width(), 3), theme.qcolor(color, 230))
+            if box.width() > 36:
+                p.setPen(theme.qcolor(color))
+                p.drawText(QRectF(box.left() + 3, r.top() + 4, box.width() - 4, 14), Qt.AlignLeft | Qt.AlignTop,
+                           "CUT" if kind == "cut" else "SILENCE")
 
     def _draw_busy(self, p: QPainter, r: QRectF, dim: bool):
         """Step text, percentage, progress bar and a sweep that keeps moving."""
@@ -409,6 +433,8 @@ class WaveformView(QWidget):
         elif self.selection and self.selection[1] - self.selection[0] < self.MIN_SELECTION_S:
             self.selection = None
             self.selectionChanged.emit(None)
+        elif self.selection:
+            self.selectionFinished.emit(self.selection)
         self._drag_start = None
         self.update()
 

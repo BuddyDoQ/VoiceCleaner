@@ -101,7 +101,7 @@ class TakeEditView(WaveformView):
 class TakeEditor(QDialog):
     """Select a region and Cut or Silence it. Edits can be clicked and removed."""
 
-    def __init__(self, take: Take, title: str, parent=None, target: str = "compilation"):
+    def __init__(self, take: Take, title: str, parent=None, target: str = "compilation", *, routing=None):
         """``target`` is what the edits end up in: "compilation", or "export" (Enhance tab)."""
         super().__init__(parent)
         self.take = take
@@ -111,7 +111,7 @@ class TakeEditor(QDialog):
         self._history: list[list] = []
         self._play_end: float | None = None  # stop here (playing a selection)
         self._result = False  # the player holds the edited take, not the original
-        self.player = AudioPlayer(self)
+        self.player = AudioPlayer(self, routing=routing)
         self.player.positionChanged.connect(self._on_position)
         self.player.stateChanged.connect(self._on_state)
 
@@ -320,7 +320,7 @@ class TakeEditor(QDialog):
         super().done(r)
 
 
-def edit_take(take: Take, title: str, parent=None, target: str = "compilation") -> list | None:
+def edit_take(take: Take, title: str, parent=None, target: str = "compilation", *, routing=None) -> list | None:
     """Show the editor; the new edits, or None when cancelled."""
-    dlg = TakeEditor(take, title or Path(take.path).name, parent, target)
+    dlg = TakeEditor(take, title or Path(take.path).name, parent, target, routing=routing)
     return list(dlg.edits) if dlg.exec() == QDialog.Accepted else None

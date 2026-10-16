@@ -22,6 +22,7 @@ from ..audio import noise_profile as noise_profile_mod
 from ..audio.analyzer import FRAME_HOP_S, analyze
 from ..audio.loader import format_duration, format_size, load_wav
 from ..audio.recorder import combine_with_original
+from ..audio.playback_routing import PlaybackRouting
 from ..audio.pipeline import EnhancementPipeline, PipelineResult
 from ..audio.settings import ProcessingSettings, apply_simple, from_preset, preset_names
 from ..export.mp3_exporter import export_mp3
@@ -85,6 +86,14 @@ class MainWindow(QMainWindow):
     def __init__(self, config: UserConfig):
         super().__init__()
         self.config = config
+        self.audio_routing = PlaybackRouting(
+            config.extra.get("audio_output"),
+            report_error=lambda message, parent=None: QMessageBox.warning(parent or self, "Playback problem", message),
+        )
+        self._output_timer = QTimer(self)
+        self._output_timer.setInterval(1000)
+        self._output_timer.timeout.connect(self.audio_routing.poll)
+        self._output_timer.start()
         self.audio = None
         self.analysis = None
         self.result: PipelineResult | None = None
@@ -133,11 +142,10 @@ class MainWindow(QMainWindow):
         if config.window_geometry:
             self.restoreGeometry(QByteArray.fromHex(config.window_geometry.encode()))
 
-        self.player = AudioPlayer(self)
+        self.player = AudioPlayer(self, routing=self.audio_routing)
         self.player.positionChanged.connect(self._on_position)
         self.player.stateChanged.connect(self._on_player_state)
         self.player.sourceChanged.connect(self._on_source_changed)
-        self.player.error.connect(lambda m: self._error("Playback problem", m))
 
         central = QWidget()
         root = QVBoxLayout(central)
@@ -147,12 +155,12 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.addTab(self._build_enhance_page(), "ENHANCE")
-        self.playback = PlaybackPanel()
+        self.playback = PlaybackPanel(routing=self.audio_routing)
         self.playback.openInEnhancer.connect(self._open_from_playback)
         self.playback.addToBatch.connect(self._add_to_batch)
         self.playback.playStarted.connect(self._pause_main_player)
         self.tabs.addTab(self.playback, "PLAYBACK")
-        self.compile_panel = CompilePanel()
+        self.compile_panel = CompilePanel(routing=self.audio_routing)
         if isinstance(self.config.extra.get("compile"), dict):
             self.compile_panel.restore_options(self.config.extra["compile"])
         self.compile_panel.exportRequested.connect(self._export_compilation)
@@ -162,7 +170,7 @@ class MainWindow(QMainWindow):
         self.compile_panel.editsChanged.connect(self._load_edits)
         self.playback.addToCompile.connect(self._add_to_compile)
         self.tabs.addTab(self.compile_panel, "COMPILE")
-        self.batch_panel = BatchPanel()
+        self.batch_panel = BatchPanel(routing=self.audio_routing)
         self.batch_panel.startRequested.connect(self._start_batch)
         self.batch_panel.cancelRequested.connect(self._cancel_batch)
         self.batch_panel.openRequested.connect(self._open_batch_result)
@@ -310,6 +318,8 @@ class MainWindow(QMainWindow):
         self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
         self.export_action = m.addAction("Export Enhanced Audio…", lambda: self.export(), QKeySequence("Ctrl+E"))
         m.addSeparator()
+        self.output_menu = m.addMenu("Audio output")
+        self.output_menu.aboutToShow.connect(self._fill_output_menu)
         dev = m.addMenu("Processing device")
         group = QActionGroup(self)
         self.device_actions = {}
@@ -356,6 +366,54 @@ class MainWindow(QMainWindow):
         self.update_action = m.addAction("Check for Updates\u2026", lambda: self.check_for_updates(manual=True))
         m.addAction(f"About {APP_NAME}", self._show_about)
         return m
+
+    def _fill_output_menu(self):
+        menu = self.output_menu
+        menu.clear()
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+
+        def choice(text, pref):
+            action = menu.addAction(text)
+            action.setCheckable(True)
+            action.setChecked(self.audio_routing.preference == pref)
+            action.triggered.connect(lambda _checked=False, p=pref: self._select_audio_output(p))
+            group.addAction(action)
+
+        choice("System default", {"mode": "system"})
+        try:
+            # Observe native changes and refresh a stale inventory only when safe.
+            self.audio_routing.poll()
+            devices = self.audio_routing.outputs()
+            for device in devices:
+                choice(f"{device.name} ({device.hostapi})", device.preference)
+            pref = self.audio_routing.preference
+            if pref["mode"] == "device" and not any(d.preference == pref for d in devices):
+                missing = menu.addAction(f'{pref["name"]} (unavailable)')
+                missing.setEnabled(False)
+        except Exception as exc:
+            unavailable = menu.addAction(f"Devices unavailable: {exc}")
+            unavailable.setEnabled(False)
+        menu.addSeparator()
+        menu.addAction("Refresh devices", self._refresh_audio_outputs)
+        # clear() deletes actions, but QActionGroups need an explicit owner lifetime.
+        old = getattr(self, "_output_actions", None)
+        if old is not None:
+            old.deleteLater()
+        self._output_actions = group
+
+    def _select_audio_output(self, preference):
+        try:
+            self.audio_routing.select(preference)
+            self.config.extra["audio_output"] = dict(self.audio_routing.preference)
+        except Exception as exc:
+            self.audio_routing.report_error(str(exc), self)
+
+    def _refresh_audio_outputs(self):
+        try:
+            self.audio_routing.refresh()
+        except Exception as exc:
+            self.audio_routing.report_error(str(exc), self)
 
     def _build_enhance_page(self) -> QWidget:
         page = QWidget()
@@ -1263,7 +1321,7 @@ class MainWindow(QMainWindow):
         mic = rp.mic_row.source if hasattr(rp, "mic_row") else None
         gain = rp.mic_row.gain if hasattr(rp, "mic_row") else 1.0
         self.player.pause() if self.player.state == "playing" else None
-        self.prompter = TeleprompterWindow(self.session, prefs, mic, gain)
+        self.prompter = TeleprompterWindow(self.session, prefs, mic, gain, routing=self.audio_routing)
         self.prompter.setWindowIcon(self.windowIcon())
         self.prompter.takeSaved.connect(self._prompter_take)
         self.prompter.scriptChanged.connect(self.compile_panel.takes_changed)
@@ -1632,7 +1690,8 @@ class MainWindow(QMainWindow):
         take = Take(Path(self.audio.info.path), samples, sr, 0, samples.shape[0])
         take.edits = edits_from_seconds(take, self.edits)
         before = list(take.edits)
-        edits = edit_take(take, f"{Path(self.audio.info.path).name} \u00b7 {which}", self, target="export")
+        edits = edit_take(take, f"{Path(self.audio.info.path).name} \u00b7 {which}", self, target="export",
+                          routing=self.audio_routing)
         if edits is None or edits == before:
             return
         take.edits = edits
@@ -2664,6 +2723,8 @@ class MainWindow(QMainWindow):
         if self.prompter is not None:
             self.prompter.close()
         self.take_enhancer.shutdown()
+        self._output_timer.stop()
+        self.audio_routing.shutdown()
         self.record_panel.shutdown()
         self.player.shutdown()
         self.playback.shutdown()

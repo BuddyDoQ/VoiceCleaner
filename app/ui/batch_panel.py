@@ -32,8 +32,9 @@ class BatchPanel(QWidget):
     previewRequested = Signal(object)  # Path: render a sample of it with the current settings
     previewStopped = Signal()  # the Preview switch was turned off
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, routing=None):
         super().__init__(parent)
+        self._audio_routing = routing
         self.files: list[Path] = []
         self.outputs: dict[int, Path] = {}  # row -> enhanced file
         self.running = False
@@ -266,7 +267,7 @@ class BatchPanel(QWidget):
     # --- preview ---------------------------------------------------------------------------
     def _build_preview(self) -> QWidget:
         self.preview_path: Path | None = None
-        self.player = AudioPlayer(self)
+        self.player = AudioPlayer(self, routing=self._audio_routing)
         self.player.stateChanged.connect(lambda s: self.play_btn.setText("\u275a\u275a" if s == "playing" else "\u25b6"))
         c = card()
         self.preview_card = c

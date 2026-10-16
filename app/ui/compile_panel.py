@@ -225,7 +225,7 @@ class CompilePanel(QWidget):
     playStarted = Signal()
     editsChanged = Signal()  # the user's edits of a take were changed and saved
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, routing=None):
         super().__init__(parent)
         self.session = None
         self.takes: dict[str, Take] = {}
@@ -249,7 +249,7 @@ class CompilePanel(QWidget):
         self._rebuild_timer = QTimer(self)
         self._rebuild_timer.setSingleShot(True)
         self._rebuild_timer.timeout.connect(lambda: self.build())
-        self.player = AudioPlayer(self)
+        self.player = AudioPlayer(self, routing=routing)
         self.player.positionChanged.connect(self._on_position)
         self.player.stateChanged.connect(lambda s: self.play_btn.setText("❚❚" if s == "playing" else "▶"))
 
@@ -777,7 +777,7 @@ class CompilePanel(QWidget):
         self.pause()
         title = next((self.list.item(i).data(TITLE_ROLE) for i in range(self.list.count())
                       if self.list.item(i).data(PATH_ROLE) == path), None) or Path(path).name
-        edits = edit_take(take, title, self)
+        edits = edit_take(take, title, self, routing=self.player.routing)
         if edits is None or edits == take.edits:
             return
         take.edits = edits

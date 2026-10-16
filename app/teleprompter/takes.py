@@ -23,6 +23,7 @@ import numpy as np
 import soundfile as sf
 
 from ..audio.recorder import BLOCK_FRAMES, RECORD_SR, InputSource, RecordingError, _co_initialize, _soundcard, _to_db
+from ..audio.playback_routing import audio_lifecycle
 from ..utils.logging import get_logger
 from .script import Unit, file_label
 
@@ -88,11 +89,17 @@ class TakeRecorder:
         channels = max(1, min(2, self.source.channels))
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            with mic.recorder(samplerate=RECORD_SR, channels=channels, blocksize=BLOCK_FRAMES) as rec:
+            recorder = mic.recorder(samplerate=RECORD_SR, channels=channels, blocksize=BLOCK_FRAMES)
+            with audio_lifecycle.stream(recorder) as rec:
                 while not stop.is_set():
                     yield np.asarray(rec.record(numframes=BLOCK_FRAMES * 5), dtype=np.float32)
 
     def _run(self):
+        with audio_lifecycle.recording():
+            self._run_guarded()
+
+    def _run_guarded(self):
+        gen = None
         try:
             gen = (self._blocks or self._device_blocks)(self._stop)
             with open(self.raw_path, "ab") as f:
@@ -116,6 +123,12 @@ class TakeRecorder:
             name = self.source.name if self.source else "the input"
             self.error = (f"Recording from “{name}” stopped unexpectedly. The device may have been "
                           "disconnected or is in use by another program.")
+        finally:
+            # Breaking a generator loop must close its native recorder before the
+            # lifecycle guard is released, even when the capture thread failed.
+            close = getattr(gen, "close", None)
+            if close is not None:
+                close()
 
     def read(self, a: int, b: int) -> np.ndarray:
         """Frames ``a``..``b`` (clamped to what has been recorded)."""

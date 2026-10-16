@@ -178,6 +178,11 @@ The details:
 * **A/B:** press `A` / `B` (or the buttons) during playback; the switch is instant and
   click-free at the same position. *Equal-loudness comparison* plays the original at
   the enhanced loudness so you judge quality, not volume.
+* **Audio output:** the ⋯ menu selects *System default* or a specific output for every
+  playback surface, including take previews. The choice is remembered. System-default
+  changes take effect during playback; a disconnected selected device pauses playback
+  and keeps its selection. Reconnect it and press Play, or choose another output.
+  Finish recording before changing outputs or refreshing devices
 * **Loop** (`L`): drag across either waveform and turn on *Loop* to repeat just that
   passage while you switch A/B or change settings. Without a selection the whole
   recording loops.

@@ -35,6 +35,7 @@ import soundfile as sf
 from ..utils.errors import VoiceCleanerError
 from ..utils.logging import get_logger
 from . import mac_system_audio
+from .playback_routing import audio_lifecycle
 from .loader import AudioData
 
 log = get_logger("recorder")
@@ -258,6 +259,11 @@ class RecordingSession:
 
     # --- capture thread -------------------------------------------------------------
     def _capture(self, sc, st: _SourceState):
+        # The UI may stop waiting before a slow native recorder has closed.
+        with audio_lifecycle.recording():
+            self._capture_guarded(sc, st)
+
+    def _capture_guarded(self, sc, st: _SourceState):
         _co_initialize()
         try:
             if st.source.id == mac_system_audio.SYSTEM_AUDIO_ID:
@@ -272,7 +278,7 @@ class RecordingSession:
                     warnings.catch_warnings():
                 # soundcard warns about "data discontinuity" when loopback has nothing playing
                 warnings.simplefilter("ignore")
-                with recorder as rec:
+                with audio_lifecycle.stream(recorder) as rec:
                     while not self._stop.is_set():
                         block = np.asarray(rec.record(numframes=BLOCK_FRAMES * 5), dtype=np.float32)
                         if block.ndim == 1:

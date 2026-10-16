@@ -236,3 +236,40 @@ Long recordings are processed in 20 s chunks with 1 s raised-cosine crossfades.
   directly; an LGPL FFmpeg, run as a separate program, decodes the rest.
 * **DeepFilterNet3 on PyTorch:** see [models/README.md](models/README.md) for the model
   comparison and licenses.
+
+### Playback routing and refresh safety
+
+`audio/playback_routing.py` owns output selection for Enhance, Playback, Compile,
+Batch, Take Editor, and the lazy teleprompter preview player. Preferences use
+`UserConfig.extra["audio_output"]`: system-default mode is distinct from an explicit
+device name and host API. Numeric PortAudio indexes are resolved anew, never saved.
+Missing or ambiguous explicit devices produce an error without falling back to speakers.
+
+SoundCard supplies the live OS inventory and default. A default-only change reopens
+the affected player on a known output without resetting PortAudio. Device topology
+changes require a global reset with the bundled PortAudio 19.7 backend; its proposed
+portable hotplug API is not available. The isolated sounddevice `_terminate()` /
+`_initialize()` adapter requires one initialization owner and successful closure of
+every registered player. No callback lock is held during stream teardown.
+The adapter assumes VoiceCleaner is the sole PortAudio client in its process;
+sounddevice's initialization counter cannot detect foreign native clients. New
+playback or recording entry points must participate in the shared lifecycle.
+
+The shared lifecycle lock serializes playback admission and global refresh against
+recording-thread admission. Recording guards cover device creation through native
+close, including system-audio helper shutdown and teleprompter generator cleanup.
+Refresh and route changes are deferred while capture is running, including slow
+teardown after a UI stop, to preserve overdub monitoring latency. A native recording
+open/close failure blocks global refresh until restart. Failed refreshes are not
+retried by the timer; Play or Audio output > Refresh devices permits an explicit retry.
+
+Playback retains source buffers, position, loop, edits and A/B state across reopening.
+The existing macOS block size and latency remain unchanged. Output format checks
+report unsupported sample rates; there is no playback resampler. Mono outputs receive
+a downmix of the stereo playback mix. Same-name devices on one host API cannot be
+distinguished reliably and fail explicitly.
+
+`tests/test_audio_routing.py` exercises routing, refresh exclusion and recovery with
+fake devices, real UI construction and capture threads. Live USB/Bluetooth switching,
+driver teardown behavior, Windows playback and audible overdub alignment still need
+hardware validation before a release.

@@ -14,6 +14,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from ..utils.logging import get_logger
+from ..audio.playback_routing import audio_lifecycle
 
 log = get_logger("player")
 
@@ -34,8 +35,13 @@ class AudioPlayer(QObject):
     sourceChanged = Signal(str)
     error = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, routing=None):
         super().__init__(parent)
+        self.routing = routing
+        self.output_device = None
+        self._lifecycle = routing.lifecycle if routing is not None else audio_lifecycle
+        if routing is not None:
+            self.error.connect(lambda message: routing.report_error(message, parent))
         self._buffers: dict[str, np.ndarray | None] = {s: None for s in SOURCES}
         self._gains = {s: 1.0 for s in SOURCES}  # volume * level-match gain
         self._volume = {s: 0.9 for s in SOURCES}
@@ -57,14 +63,19 @@ class AudioPlayer(QObject):
         self._timer = QTimer(self)
         self._timer.setInterval(33)
         self._timer.timeout.connect(self._tick)
+        if routing is not None:
+            routing.register(self)
 
     # --- configuration ----------------------------------------------------------
     def set_source(self, name: str, samples: np.ndarray | None, sr: int | None = None):
+        # Closing can wait for the callback, which itself needs _lock.
+        if sr is not None and sr != self._sr and self._stream is not None:
+            if not self._close_stream():
+                self.fail_output("The previous audio stream could not be closed.")
+                return
         with self._lock:
             self._buffers[name] = samples
             if sr is not None:
-                if sr != self._sr and self._stream is not None:
-                    self._close_stream()
                 if sr != self._sr:
                     self._sr = sr
                     self._edit_frames()
@@ -178,6 +189,10 @@ class AudioPlayer(QObject):
         return self._pos / self._sr
 
     def play(self):
+        with self._lifecycle.lock:
+            self._play()
+
+    def _play(self):
         if self._buffers.get(self._active) is None:
             return
         if self._pos >= self._buffers[self._active].shape[0] - 1:
@@ -185,17 +200,18 @@ class AudioPlayer(QObject):
         if self._loop is not None and not (self._loop[0] <= self._pos < self._loop[1]):
             self._pos = self._loop[0]
         try:
+            device = self.routing.prepare(self) if self.routing is not None else None
+            if self._stream is not None and self.output_device != device:
+                if not self._close_stream():
+                    raise RuntimeError("The previous audio stream could not be closed.")
             if self._stream is not None and not self._stream.active:
-                self._close_stream()  # a stream that ran to the end cannot be restarted
-            self._ensure_stream()
+                if not self._close_stream():
+                    raise RuntimeError("The previous audio stream could not be closed.")
+            self._ensure_stream(device)
             self._stream.start()
         except Exception as exc:
             log.warning("Audio output failed: %s", exc)
-            self._close_stream()
-            self.error.emit(
-                "No audio output device could be opened. Check that speakers or headphones "
-                "are connected and not in use by another application."
-            )
+            self.fail_output(f"Audio playback could not start: {exc}")
             return
         self._ended = False
         self._set_state("playing")
@@ -203,7 +219,11 @@ class AudioPlayer(QObject):
 
     def pause(self):
         if self._stream is not None and self._state == "playing":
-            self._stream.stop()
+            try:
+                self._stream.stop()
+            except Exception as exc:
+                self.fail_output(f"Audio playback stopped unexpectedly: {exc}")
+                return
         self._set_state("paused")
         self._timer.stop()
         self.positionChanged.emit(self.position)
@@ -236,7 +256,22 @@ class AudioPlayer(QObject):
 
     def shutdown(self):
         self._timer.stop()
+        if self._close_stream() and self.routing is not None:
+            self.routing.unregister(self)
+
+    def suspend_output(self):
+        """Release the device without resetting the playhead, sources, edits or loop."""
+        self._timer.stop()
         self._close_stream()
+        if self._state == "playing":
+            self._set_state("paused")
+        self.positionChanged.emit(self.position)
+
+    def fail_output(self, message: str):
+        log.warning("%s", message)
+        self.suspend_output()
+        self._set_state("paused")
+        self.error.emit(message)
 
     # --- internals --------------------------------------------------------------------
     def _set_state(self, state: str):
@@ -244,28 +279,43 @@ class AudioPlayer(QObject):
             self._state = state
             self.stateChanged.emit(state)
 
-    def _ensure_stream(self):
+    def _ensure_stream(self, device=None):
         if self._stream is not None:
             return
-        import sounddevice as sd
+        if self.routing is not None:
+            sd = self.routing.backend
+        else:
+            import sounddevice as sd
 
         if sys.platform == "darwin":
             blocksize, latency = int(self._sr * MAC_BLOCK_S), MAC_LATENCY_S
         else:
             blocksize, latency = 0, "low"
+        channels = min(2, device.channels) if device is not None else 2
+        index = device.index if device is not None else None
+        sd.check_output_settings(device=index, samplerate=self._sr, channels=channels, dtype="float32")
         self._stream = sd.OutputStream(
-            samplerate=self._sr, channels=2, dtype="float32", callback=self._callback,
+            device=index, samplerate=self._sr, channels=channels, dtype="float32", callback=self._callback,
             blocksize=blocksize, latency=latency,
         )
+        self.output_device = device
 
     def _close_stream(self):
-        if self._stream is not None:
+        with self._lifecycle.lock:
+            if self._stream is None:
+                return True
             try:
-                self._stream.stop()
+                self._stream.abort()
+            except Exception as exc:
+                log.warning("Could not abort audio stream: %s", exc)
+            try:
                 self._stream.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("Could not close audio stream: %s", exc)
+                return False  # retain the handle; a global refresh must fail closed
             self._stream = None
+            self.output_device = None
+            return True
 
     def _positions(self, pos: int, frames: int) -> tuple[np.ndarray, int]:
         """The frames to play next from ``pos``, wrapping at the loop end and jumping over
@@ -379,7 +429,7 @@ class AudioPlayer(QObject):
             if env is not None:
                 data *= env[:, None]
             np.clip(data, -1.0, 1.0, out=data)
-            outdata[:] = data
+            outdata[:] = data if outdata.shape[1] == 2 else data.mean(axis=1, keepdims=True)
             buf = self._buffers.get(self._active)
             self._pos = nxt
             if self._loop is not None:
@@ -400,4 +450,13 @@ class AudioPlayer(QObject):
             self._pos = 0
             self.positionChanged.emit(0.0)
             return
+        if self._state == "playing":
+            try:
+                if self._stream is None or not self._stream.active:
+                    self.fail_output("Audio playback stopped unexpectedly. Check the output device "
+                                     "and choose Play to retry.")
+                    return
+            except Exception as exc:
+                self.fail_output(f"Audio playback stopped unexpectedly: {exc}")
+                return
         self.positionChanged.emit(self.position)

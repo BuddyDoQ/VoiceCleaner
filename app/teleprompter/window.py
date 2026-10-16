@@ -292,8 +292,10 @@ class TeleprompterWindow(QWidget):
     scriptChanged = Signal()
     closed = Signal()
 
-    def __init__(self, session, prefs: dict, mic: InputSource | None = None, gain: float = 1.0, parent=None):
+    def __init__(self, session, prefs: dict, mic: InputSource | None = None, gain: float = 1.0, parent=None,
+                 *, routing=None):
         super().__init__(parent, Qt.Window)
+        self.audio_routing = routing
         self.setObjectName("prompter")
         self.setWindowTitle("VoiceCleaner Teleprompter")
         self.setMinimumSize(640, 420)
@@ -973,7 +975,7 @@ class TeleprompterWindow(QWidget):
         from ..ui.audio_player import AudioPlayer
 
         if self._player is None:
-            self._player = AudioPlayer(self)
+            self._player = AudioPlayer(self, routing=self.audio_routing)
         info, path = self._last_take
         audio = load_wav(path)
         self._player.set_source("original", audio.samples, audio.sample_rate)

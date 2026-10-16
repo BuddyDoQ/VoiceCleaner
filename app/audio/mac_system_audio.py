@@ -148,6 +148,7 @@ class SystemAudioRecorder:
                 p.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 p.kill()
+                p.wait(timeout=2)  # teardown must finish before a routing refresh is allowed
         finally:
             if p.stdout:
                 p.stdout.close()

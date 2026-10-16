@@ -81,7 +81,7 @@ class PlaybackPanel(QWidget):
     addToCompile = Signal(list)
     playStarted = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, routing=None):
         super().__init__(parent)
         self.session = None
         self.mode = "session"  # session | all | folder
@@ -91,7 +91,7 @@ class PlaybackPanel(QWidget):
         self.current: Path | None = None
         self._scan_task = None
         self._load_task = None
-        self.player = AudioPlayer(self)
+        self.player = AudioPlayer(self, routing=routing)
         self.player.positionChanged.connect(self._on_position)
         self.player.stateChanged.connect(self._on_state)
 

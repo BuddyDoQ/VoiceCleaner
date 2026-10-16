@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.7
+
+- **New VoiceCleaner logo:** the Steamburger burger now has a sound wave between the buns. It
+  is in the app, the Windows icon (every size from 16 to 256 px) and the installer, drawn
+  from vector artwork so it stays crisp at every size, with a soft edge that keeps it visible
+  on light backgrounds as well as dark.
+
 ## 1.1.6
 
 - **Edit Take in the Enhance tab.** Click *Edit Take…* above the Original track (or right-click

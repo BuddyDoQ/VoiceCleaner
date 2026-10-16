@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 APP_NAME = "VoiceCleaner"
-APP_VERSION = "1.1.6"
+APP_VERSION = "1.1.7"
 
 
 def app_root() -> Path:

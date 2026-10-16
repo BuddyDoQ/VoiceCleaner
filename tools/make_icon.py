@@ -57,13 +57,53 @@ def write_ico(path: Path):
     path.write_bytes(header + entries + data)
 
 
+# macOS app icons sit on a rounded-square tile (Apple's grid: an 824 px tile inset 100 px on a
+# 1024 canvas, corner radius ~185 px). A bare shape is put in a grey tile by macOS 26 and later,
+# and looks too big next to other apps. The Windows icon keeps the bare logo.
+MAC_TILE = (100 / 1024, 824 / 1024, 185 / 1024)  # inset, size, corner radius (fractions)
+MAC_LOGO = 0.62  # logo size as a fraction of the canvas, centred on the tile
+MAC_LOGO_SMALL = 0.74  # at 16 and 32 px the logo fills more of the tile to stay legible
+MAC_TILE_TOP, MAC_TILE_BOTTOM = "#22222f", "#07070e"  # the app's dark theme, lifted at the top
+
+
+def mac_icon_pixmap(size: int):
+    """The logo on a macOS-style dark tile, ``size`` px square."""
+    from PySide6.QtCore import QPointF, QRectF, Qt
+    from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
+    inset, side, radius = (f * size for f in MAC_TILE)
+    tile = QRectF(inset, inset, side, side)
+    for i in range(6):  # soft drop shadow below the tile
+        sh = QPainterPath()
+        grow = size * 0.004 * (i + 1)
+        sh.addRoundedRect(tile.adjusted(-grow, -grow + size * 0.012, grow, grow + size * 0.012), radius + grow, radius + grow)
+        p.fillPath(sh, QColor(0, 0, 0, 14))
+    path = QPainterPath()
+    path.addRoundedRect(tile, radius, radius)
+    grad = QLinearGradient(QPointF(0, tile.top()), QPointF(0, tile.bottom()))
+    grad.setColorAt(0.0, QColor(MAC_TILE_TOP))
+    grad.setColorAt(1.0, QColor(MAC_TILE_BOTTOM))
+    p.fillPath(path, grad)
+    p.setPen(QPen(QColor(255, 255, 255, 34), max(1.0, size / 512)))  # faint edge, reads on dark docks
+    p.drawPath(path)
+    logo = max(1, round(size * (MAC_LOGO_SMALL if size <= 32 else MAC_LOGO)))  # list views: larger logo
+    p.drawPixmap(round((size - logo) / 2), round((size - logo) / 2 + size * 0.01), render_icon_pixmap(logo))
+    p.end()
+    return pm
+
+
 def write_icns(path: Path):
-    """iconutil builds an .icns from an .iconset folder of fixed-name PNGs."""
+    """iconutil builds an .icns from an .iconset folder of fixed-name PNGs (macOS-style tile)."""
     iconset = Path(tempfile.mkdtemp()) / "voicecleaner.iconset"
     iconset.mkdir()
     for size in (16, 32, 128, 256, 512):
-        render_icon_pixmap(size).save(str(iconset / f"icon_{size}x{size}.png"), "PNG")
-        render_icon_pixmap(size * 2).save(str(iconset / f"icon_{size}x{size}@2x.png"), "PNG")
+        mac_icon_pixmap(size).save(str(iconset / f"icon_{size}x{size}.png"), "PNG")
+        mac_icon_pixmap(size * 2).save(str(iconset / f"icon_{size}x{size}@2x.png"), "PNG")
     subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(path)], check=True)
     shutil.rmtree(iconset.parent)
     print("wrote", path)

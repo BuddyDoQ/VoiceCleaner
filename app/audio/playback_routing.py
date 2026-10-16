@@ -6,6 +6,7 @@ a refresh, performed only after capture has ended and every player has closed.
 """
 from __future__ import annotations
 
+import re
 import sys
 import threading
 from contextlib import contextmanager
@@ -131,6 +132,15 @@ class PlaybackRouting:
         apis = self.backend.query_hostapis()
         return [OutputDevice(i, d["name"], apis[d["hostapi"]]["name"], int(d["max_output_channels"]))
                 for i, d in enumerate(self.backend.query_devices()) if d["max_output_channels"] > 0]
+
+    def organized(self) -> "OutputGroups":
+        """The outputs grouped for the menu: active, other connections, inactive."""
+        snapshot = self._snapshot if self._snapshot is not None else self._observe()
+        return organize_outputs(self.outputs(), snapshot)
+
+    @property
+    def default_name(self) -> str | None:
+        return self._snapshot.default_name if self._snapshot is not None else None
 
     def _observe(self) -> OutputSnapshot:
         snapshot = self._probe()
@@ -265,3 +275,55 @@ class PlaybackRouting:
     def shutdown(self):
         for p in list(self._players):
             p.shutdown()
+
+
+# Windows' own names for "the default output" (System default covers them)
+DEFAULT_ALIASES = ("Microsoft Sound Mapper - Output", "Primary Sound Driver")
+# the connection used for an active output, best first ("System default" prefers the same)
+API_PREFERENCE = ("Windows WASAPI", "Core Audio", "Windows DirectSound", "MME", "Windows WDM-KS")
+
+
+@dataclass
+class OutputGroups:
+    active: list  # one OutputDevice per output Windows is using, through its best connection
+    other: list  # the same active outputs through other connections (troubleshooting)
+    inactive: list  # known to PortAudio, not connected or disabled in Windows
+
+
+_DRIVER_STRING = re.compile(r"@[^;]*;\s*%1\s*([^%]*?)\s*%0\s*;\s*\(([^)]*)\)")
+
+
+def display_name(name: str) -> str:
+    r"""A device name as people should read it. Windows' kernel-streaming names can contain
+    a raw driver string, e.g. "Headset (@System32\drivers\bthhfenum.sys,#2;%1 Hands-Free%0
+    ;(Mpow Flame Solo))", which is "Headset (Mpow Flame Solo Hands-Free)"."""
+    name = " ".join(str(name).split())
+    return _DRIVER_STRING.sub(lambda m: f"{m.group(2).strip()} {m.group(1).strip()}".strip(), name)
+
+
+def organize_outputs(outputs: list[OutputDevice], snapshot: OutputSnapshot) -> OutputGroups:
+    """Sort PortAudio's outputs by what the operating system reports as active."""
+    live = [name for _id, name in snapshot.devices]
+    rank = {api: i for i, api in enumerate(API_PREFERENCE)}
+    by_name: dict[str, list[OutputDevice]] = {}
+    inactive = []
+    for d in outputs:
+        if d.name in DEFAULT_ALIASES:
+            continue
+        if d.name in live:
+            by_name.setdefault(d.name, []).append(d)
+        elif any(n.startswith(d.name) for n in live):
+            continue  # an MME name cut off at 31 characters: a duplicate that cannot be resolved
+        elif d.name.replace(" Wave)", ")").removesuffix(" Wave") in live:
+            continue  # the kernel-streaming twin of an active output
+        else:
+            inactive.append(d)
+    active, other = [], []
+    # the default output first, then by name
+    for name in sorted(live, key=lambda n: (n != snapshot.default_name, n.lower())):
+        variants = sorted(by_name.get(name, []), key=lambda d: rank.get(d.hostapi, len(rank)))
+        if variants:
+            active.append(variants[0])
+            other.extend(variants[1:])
+    inactive.sort(key=lambda d: (display_name(d.name).lower(), d.hostapi))
+    return OutputGroups(active, other, inactive)

@@ -74,7 +74,7 @@ class AboutDialog(QDialog):
         words = QVBoxLayout()
         words.setSpacing(0)
         words.addWidget(_label("STEAMBURGER STUDIOS", "section", "accent"))
-        words.addWidget(_label("VOICECLEANER", "display"))
+        words.addWidget(_label("VOICECLEANER", "wordmark"))  # the logo's name: always the brand face
         from ..utils.config import edition
 
         ed = {"gpu": " · NVIDIA GPU EDITION", "standard": " · STANDARD EDITION"}.get(edition(), "")
@@ -82,8 +82,9 @@ class AboutDialog(QDialog):
         top.addLayout(words, 1)
         v.addLayout(top)
         v.addSpacing(10)
-        body = _label("Speech cleanup and enhancement for WAV recordings: noise and room reduction, neural "
-                      "voice re-synthesis, EQ, leveling and loudness, plus recording, sessions and playback.\n"
+        body = _label("Speech cleanup and enhancement for recordings and the sound of videos: noise, echo, "
+                      "hum and clipping repair, neural voice re-synthesis, EQ, leveling and loudness, plus "
+                      "recording, a teleprompter, compiling takes and batch processing.\n"
                       "Works fully offline. Your audio never leaves this computer.", "muted")
         body.setWordWrap(True)
         v.addWidget(body)

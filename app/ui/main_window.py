@@ -373,25 +373,52 @@ class MainWindow(QMainWindow):
         group = QActionGroup(menu)
         group.setExclusive(True)
 
-        def choice(text, pref):
-            action = menu.addAction(text)
+        from ..audio.playback_routing import display_name
+
+        pref = self.audio_routing.preference
+
+        def choice(where, text, p, enabled=True):
+            action = where.addAction(text)
             action.setCheckable(True)
-            action.setChecked(self.audio_routing.preference == pref)
-            action.triggered.connect(lambda _checked=False, p=pref: self._select_audio_output(p))
+            action.setChecked(pref == p)
+            action.setEnabled(enabled or pref == p)  # the saved choice always shows, ticked
+            action.triggered.connect(lambda _checked=False, p=p: self._select_audio_output(p))
             group.addAction(action)
 
-        choice("System default", {"mode": "system"})
         try:
             # Observe native changes and refresh a stale inventory only when safe.
             self.audio_routing.poll()
-            devices = self.audio_routing.outputs()
-            for device in devices:
-                choice(f"{device.name} ({device.hostapi})", device.preference)
-            pref = self.audio_routing.preference
-            if pref["mode"] == "device" and not any(d.preference == pref for d in devices):
+            groups = self.audio_routing.organized()
+            default = self.audio_routing.default_name
+            choice(menu, f"System default  ({default})" if default else "System default", {"mode": "system"})
+            # what the operating system is using now: one entry each, through its best connection
+            menu.addSeparator()
+            menu.addAction("ACTIVE").setEnabled(False)  # a caption (Fusion draws sections as a bare line)
+            for d in groups.active:
+                choice(menu, display_name(d.name), d.preference)
+            if not groups.active:
+                menu.addAction("No active outputs").setEnabled(False)
+            # submenus only when there is something in them (a Mac lists connected outputs
+            # through one audio system: there, both stay hidden)
+            if groups.inactive:
+                inactive = menu.addMenu(f"Inactive ({len(groups.inactive)})")
+                inactive.setToolTipsVisible(True)
+                inactive.setToolTip("Known outputs that are not connected or are disabled in the system's "
+                                    "sound settings.")
+                for d in groups.inactive:
+                    choice(inactive, f"{display_name(d.name)}  ({d.hostapi})", d.preference, enabled=False)
+            if groups.other:
+                other = menu.addMenu("Other connections")
+                other.setToolTipsVisible(True)
+                other.setToolTip("The active outputs through other audio systems, for troubleshooting.")
+                for d in groups.other:
+                    choice(other, f"{display_name(d.name)}  ({d.hostapi})", d.preference)
+            shown = groups.active + groups.other + groups.inactive
+            if pref["mode"] == "device" and not any(d.preference == pref for d in shown):
                 missing = menu.addAction(f'{pref["name"]} (unavailable)')
                 missing.setEnabled(False)
         except Exception as exc:
+            choice(menu, "System default", {"mode": "system"})
             unavailable = menu.addAction(f"Devices unavailable: {exc}")
             unavailable.setEnabled(False)
         menu.addSeparator()
@@ -2623,6 +2650,15 @@ class MainWindow(QMainWindow):
         if not getattr(self, "_tour_checked", False):
             self._tour_checked = True
             QTimer.singleShot(900, self._tour_on_start)
+            # load the audio library now, quietly, so the first Play starts at once
+            threading.Thread(target=self._warm_up_audio, name="audio-warm-up", daemon=True).start()
+
+    @staticmethod
+    def _warm_up_audio():
+        try:
+            import sounddevice  # noqa: F401 - initializes PortAudio (device list) once
+        except Exception as exc:  # no audio device: reported when something is played
+            log.info("Audio warm-up skipped: %s", exc)
 
     def _tour_on_start(self):
         """First start of a new install: the basics. First start after an update: what is

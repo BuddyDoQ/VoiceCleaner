@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1.8
+
+- **Plays at once.** On some PCs the first Play of a session took a few seconds and showed a
+  window: VoiceCleaner picked up another program's audio library (PortAudio from Csound or
+  similar software) that opens every ASIO driver while starting, and Windows briefly showed
+  a console window while VoiceCleaner looked up the Windows version. It now always uses its
+  own audio library, starts no other program, and gets audio ready in the background as soon
+  as the window opens. The first Play went from 2.8 s to about 0.3 s.
+- **Audio output, organized:** *System default* (naming the current device), then the
+  **Active** outputs, each once by its full name, the default first. Outputs that are not
+  connected or are disabled are under *Inactive* (greyed out), and the same outputs through
+  other audio systems under *Other connections*. Raw Windows driver names are shown readably
+  ("Headset (Mpow Flame Solo Hands-Free)"). On a Mac, where every listed output is connected,
+  the menu is just the list.
+- **Refined logo artwork** in the app, the Windows icon and the installer.
+- **About:** the VoiceCleaner name in the brand typeface, and a description of what it does now.
+
 ## 1.1.7
 
 - **New VoiceCleaner logo:** the Steamburger burger now has a sound wave between the buns. It

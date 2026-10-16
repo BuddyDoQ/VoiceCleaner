@@ -243,6 +243,7 @@ QLabel[tone="faint"] {{ color: {FAINT}; }}
 QLabel[tone="muted"] {{ color: {MUTED}; }}
 QLabel[role="score"] {{ {heading(34)} }}
 QLabel[role="brand"] {{ font-family: {brand_disp}; font-size: 19pt; letter-spacing: 1px; }}
+QLabel[role="wordmark"] {{ font-family: {brand_disp}; font-size: 30pt; letter-spacing: 1px; }}
 QLabel[role="brandsub"] {{ font-family: {mono}; font-size: 7.5pt; color: {FAINT}; letter-spacing: 2px; }}
 QLabel[role="eqvalue"] {{ color: {FAINT}; font-family: {mono}; font-size: 7.5pt; }}
 QLabel[role="eqvalue"][active="true"] {{ color: {ACCENT}; }}
@@ -364,6 +365,7 @@ QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 4px; color
 QMenu {{ background: {SURFACE}; border: 1px solid {BORDER_STRONG}; padding: 4px; }}
 QMenu::item {{ padding: 6px 18px; border-radius: 3px; }}
 QMenu::item:selected {{ background: {SURFACE_3}; }}
+QMenu::item:disabled {{ color: {FAINT}; }}
 QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 8px; }}
 QMessageBox {{ background: {BG}; }}
 """)

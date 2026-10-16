@@ -547,12 +547,12 @@ def test_all_playback_surfaces_share_router_and_report_errors(qapp, tmp_path, mo
         window.audio_routing._backend = backend
         window.audio_routing._probe = lambda: OutputSnapshot((("1", "Built-in"), ("2", "USB")), "Built-in")
         window._fill_output_menu()
-        next(a for a in window.output_menu.actions() if a.text() == "USB (Core Audio)").trigger()
+        next(a for a in window.output_menu.actions() if a.text() == "USB").trigger()  # active: the name alone
         assert window.config.extra["audio_output"] == {
             "mode": "device", "name": "USB", "hostapi": "Core Audio"}
         assert window.config.device_preference == "auto"
         window._fill_output_menu()
-        next(a for a in window.output_menu.actions() if a.text() == "System default").trigger()
+        next(a for a in window.output_menu.actions() if a.text().startswith("System default")).trigger()
         assert window.config.extra["audio_output"] == {"mode": "system"}
         # The sixth player is lazy. Exercise the real preview construction path.
         monkeypatch.setattr("app.audio.loader.load_wav", lambda path: SimpleNamespace(
@@ -620,3 +620,57 @@ def test_capture_thread_holds_guard_through_native_close(tmp_path, monkeypatch, 
     assert audio_lifecycle.recordings == 0
     routing.refresh()
     assert backend.events == ["terminate", "initialize"]
+
+
+def test_outputs_are_organized_by_active_and_inactive():
+    from app.audio.playback_routing import OutputDevice, OutputSnapshot, organize_outputs
+
+    def dev(i, name, api):
+        return OutputDevice(i, name, api, 2)
+
+    outputs = [
+        dev(0, "Microsoft Sound Mapper - Output", "MME"),
+        dev(1, "Speakers (2- Realtek(R) Audio)", "MME"),
+        dev(2, "Speakers (Steam Streaming Speak", "MME"),  # cut off at 31 characters
+        dev(3, "Primary Sound Driver", "Windows DirectSound"),
+        dev(4, "Speakers (2- Realtek(R) Audio)", "Windows DirectSound"),
+        dev(5, "Speakers (Steam Streaming Speakers)", "Windows WASAPI"),
+        dev(6, "Speakers (2- Realtek(R) Audio)", "Windows WASAPI"),
+        dev(7, "Output (NVIDIA High Definition Audio)", "Windows WDM-KS"),
+        dev(8, "Headphones ()", "Windows WDM-KS"),
+    ]
+    snap = OutputSnapshot((("a", "Speakers (2- Realtek(R) Audio)"), ("b", "Speakers (Steam Streaming Speakers)")),
+                          "Speakers (2- Realtek(R) Audio)")
+    g = organize_outputs(outputs, snap)
+    assert [(d.name, d.hostapi) for d in g.active] == [
+        ("Speakers (2- Realtek(R) Audio)", "Windows WASAPI"),
+        ("Speakers (Steam Streaming Speakers)", "Windows WASAPI")]
+    assert {(d.index) for d in g.other} == {1, 4}  # Realtek through MME and DirectSound
+    assert [d.name for d in g.inactive] == ["Headphones ()", "Output (NVIDIA High Definition Audio)"]
+    shown = {d.index for d in g.active + g.other + g.inactive}
+    assert not shown & {0, 2, 3}  # default aliases and cut-off duplicates are left out
+
+
+def test_output_names_are_readable_and_the_default_comes_first():
+    from app.audio.playback_routing import OutputDevice, OutputSnapshot, display_name, organize_outputs
+
+    raw = "Headset (@System32\\drivers\\bthhfenum.sys,#2;%1 Hands-Free%0\n;(Mpow Flame Solo))"
+    assert display_name(raw) == "Headset (Mpow Flame Solo Hands-Free)"
+    assert display_name("Speakers (2- Realtek(R) Audio)") == "Speakers (2- Realtek(R) Audio)"
+    outs = [OutputDevice(0, "A speakers", "Windows WASAPI", 2), OutputDevice(1, "Z speakers", "Windows WASAPI", 2),
+            OutputDevice(2, "A speakers Wave", "Windows WDM-KS", 2)]
+    g = organize_outputs(outs, OutputSnapshot((("1", "A speakers"), ("2", "Z speakers")), "Z speakers"))
+    assert [d.name for d in g.active] == ["Z speakers", "A speakers"]  # the default first
+    assert g.inactive == []  # "... Wave" is the kernel-streaming twin of an active output
+
+
+def test_mac_outputs_are_all_active_with_nothing_else_to_show():
+    from app.audio.playback_routing import OutputDevice, OutputSnapshot, organize_outputs
+
+    outs = [OutputDevice(0, "MacBook Pro Speakers", "Core Audio", 2),
+            OutputDevice(1, "AirPods Pro", "Core Audio", 2),
+            OutputDevice(2, "BlackHole 2ch", "Core Audio", 2)]
+    snap = OutputSnapshot((("a", "AirPods Pro"), ("b", "BlackHole 2ch"), ("c", "MacBook Pro Speakers")), "AirPods Pro")
+    g = organize_outputs(outs, snap)
+    assert [d.name for d in g.active] == ["AirPods Pro", "BlackHole 2ch", "MacBook Pro Speakers"]
+    assert g.other == [] and g.inactive == []  # the menu then shows no submenus

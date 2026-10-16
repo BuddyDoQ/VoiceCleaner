@@ -267,6 +267,14 @@ class AudioPlayer(QObject):
             self._set_state("paused")
         self.positionChanged.emit(self.position)
 
+    def resume_output(self):
+        # Teardown waits for the callback, which may finish the track meanwhile.
+        # Automatic rerouting must not turn normal completion into a replay.
+        if self._ended:
+            self._tick()
+        else:
+            self.play()
+
     def fail_output(self, message: str):
         log.warning("%s", message)
         self.suspend_output()

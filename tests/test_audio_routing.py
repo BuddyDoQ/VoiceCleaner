@@ -318,6 +318,27 @@ def test_normal_completion_is_not_reported_as_device_failure(rig):
     assert p.state == "stopped" and not rig.errors
 
 
+@pytest.mark.parametrize("global_refresh", [False, True])
+def test_finishing_during_reroute_does_not_replay_track(rig, global_refresh):
+    p = rig.player()
+    p.play()
+    original = p._stream.abort
+
+    def abort():
+        original()
+        p._pos = p._buffers[p.active_source].shape[0]
+        p._ended = True
+
+    p._stream.abort = abort
+    if global_refresh:
+        rig.routing.refresh()
+    else:
+        rig.live.default = "USB"
+        rig.routing.poll()
+    assert p.state == "stopped" and p._stream is None
+    assert len(rig.backend.streams) == 1 and not rig.errors
+
+
 def test_refresh_never_holds_callback_lock(rig):
     p = rig.player()
     p.play()

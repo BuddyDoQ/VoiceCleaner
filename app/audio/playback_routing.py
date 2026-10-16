@@ -230,7 +230,7 @@ class PlaybackRouting:
             self._refresh_failed = False
             for p in playing:
                 if p is not requester:
-                    p.play()
+                    p.resume_output()
 
     def select(self, preference):
         with self.lifecycle.lock:
@@ -257,7 +257,7 @@ class PlaybackRouting:
                 for p in playing:
                     if p.output_device != device:
                         p.suspend_output()
-                        p.play()
+                        p.resume_output()
             except Exception as exc:
                 for p in playing:
                     p.fail_output(str(exc))

@@ -301,10 +301,19 @@ class AudioPlayer(QObject):
             blocksize, latency = 0, "low"
         channels = min(2, device.channels) if device is not None else 2
         index = device.index if device is not None else None
-        sd.check_output_settings(device=index, samplerate=self._sr, channels=channels, dtype="float32")
+        extra = None
+        if device is not None and device.hostapi == "Windows WASAPI":
+            # Shared-mode WASAPI only accepts the mixer's rate (often 48 kHz); without
+            # auto_convert a 44.1 kHz file fails to open. Let Windows resample, as MME did.
+            try:
+                extra = sd.WasapiSettings(auto_convert=True)
+            except (AttributeError, TypeError):  # sounddevice without auto_convert
+                extra = None
+        sd.check_output_settings(device=index, samplerate=self._sr, channels=channels, dtype="float32",
+                                 extra_settings=extra)
         self._stream = sd.OutputStream(
             device=index, samplerate=self._sr, channels=channels, dtype="float32", callback=self._callback,
-            blocksize=blocksize, latency=latency,
+            blocksize=blocksize, latency=latency, extra_settings=extra,
         )
         self.output_device = device
 

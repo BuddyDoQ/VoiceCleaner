@@ -298,6 +298,38 @@ def test_windows_system_default_prefers_wasapi(rig, monkeypatch):
     assert rig.backend.events == []
 
 
+def test_wasapi_output_resamples_non_mixer_rates(rig, monkeypatch):
+    """Shared-mode WASAPI rejects any rate but the mixer's unless auto_convert is set."""
+    monkeypatch.setattr("app.audio.playback_routing.sys.platform", "win32")
+    rig.backend.query_hostapis = lambda: [{"name": "MME"}, {"name": "Windows WASAPI"}]
+    rig.backend.query_devices = lambda: [
+        {"name": "Built-in", "hostapi": 0, "max_output_channels": 2},
+        {"name": "Built-in", "hostapi": 1, "max_output_channels": 2},
+    ]
+    rig.backend.WasapiSettings = lambda auto_convert=False: SimpleNamespace(auto_convert=auto_convert)
+
+    def check(**options):
+        extra = options.get("extra_settings")
+        if options["device"] == 1 and options["samplerate"] != 48000 and not getattr(extra, "auto_convert", False):
+            raise RuntimeError("Invalid sample rate [PaErrorCode -9997]")
+
+    rig.backend.check_output_settings = check
+    p = rig.player()
+    p.set_source("original", np.ones((441000, 1), np.float32) * 0.1, 44100)
+    p.set_source("enhanced", np.ones((441000, 1), np.float32) * 0.2, 44100)
+    p.play()
+    assert rig.errors == []
+    assert p.state == "playing"
+    assert p._stream.options["device"] == 1
+    assert p._stream.options["extra_settings"].auto_convert is True
+
+
+def test_non_wasapi_output_gets_no_extra_settings(rig):
+    p = rig.player()
+    p.play()
+    assert p._stream.options["extra_settings"] is None
+
+
 def test_mono_output_uses_playback_downmix(rig):
     rig.backend.query_devices = lambda: [{"name": "Built-in", "hostapi": 0, "max_output_channels": 1}]
     p = rig.player()

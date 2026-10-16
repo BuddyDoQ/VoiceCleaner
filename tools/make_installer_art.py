@@ -3,6 +3,7 @@
 WixUIDialogBmp 493x312: welcome/finish pages; the left 164 px are artwork, the dialog
 text is drawn on the right, so that side stays light.
 WixUIBannerBmp 493x58: top banner of the inner pages; title text is drawn on the left.
+bundle_logo.png 64x64: the logo on the setup bundle's own window.
 """
 import sys
 from pathlib import Path
@@ -66,7 +67,8 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     dialog_bmp(OUT / "dialog.bmp")
     banner_bmp(OUT / "banner.bmp")
-    print("wrote", OUT / "dialog.bmp", "and", OUT / "banner.bmp")
+    logo_pixmap(64, dpr=1).save(str(OUT / "bundle_logo.png"), "PNG")
+    print("wrote", OUT / "dialog.bmp", OUT / "banner.bmp", "and", OUT / "bundle_logo.png")
 
 
 if __name__ == "__main__":

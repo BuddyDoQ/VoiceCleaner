@@ -232,7 +232,7 @@ class MainWindow(QMainWindow):
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(20, 10, 16, 10)
         lay.setSpacing(10)
-        icon = QLabel()
+        self.header_logo = icon = QLabel()
         icon.setPixmap(logo_pixmap(40))
         icon.setToolTip(STUDIO_NAME)
         lay.addWidget(icon)

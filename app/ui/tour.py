@@ -128,6 +128,10 @@ WHATS_NEW = [
          "When you drag across the waveform, the playhead jumps to the start of the selection, "
          "so Play starts right there.",
          tab=0, target=lambda w: _visible(w.wave_orig), version="1.1.6"),
+    Step("A new look",
+         "VoiceCleaner has a new logo: the Steamburger burger with a sound wave between the buns, "
+         "here, on the taskbar and in the installer.",
+         target=lambda w: _visible(w.header_logo), version="1.1.7"),
 ]
 
 

@@ -53,6 +53,35 @@ class ElidedLabel(QLabel):
         return sh
 
 
+class TimeLabel(QLabel):
+    """Playback time ("0:12.3 / 2:55.6"), set many times a second while playing. Its size is
+    fixed, so a new text does not lay out and repaint the whole tab each time (with many
+    takes in the Compile list, that starved the audio). It only grows for a longer text."""
+
+    def __init__(self, text: str = "0:00.0 / 0:00.0", parent=None):
+        super().__init__(text, parent)
+        self.setProperty("role", "mono")
+        self._chars = len("00:00.0 / 00:00.0")  # any time under an hour
+        self._fit()
+
+    def setText(self, text: str):
+        if len(text) > self._chars:
+            self._chars = len(text)
+            self._fit()
+        super().setText(text)
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if e.type() in (QEvent.FontChange, QEvent.StyleChange):
+            self._fit()
+
+    def _fit(self):
+        fm = self.fontMetrics()
+        m = self.contentsMargins()
+        self.setFixedSize(fm.horizontalAdvance("0" * self._chars) + m.left() + m.right() + 2,
+                          fm.height() + m.top() + m.bottom() + 2)
+
+
 def card() -> QFrame:
     f = QFrame()
     f.setProperty("role", "card")

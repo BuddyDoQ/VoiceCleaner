@@ -32,7 +32,7 @@ from ..workers.processing_worker import run_task
 from . import theme
 from .audio_player import AudioPlayer
 from .waveform import WaveformOverview, WaveformView
-from .widgets import card, label
+from .widgets import TimeLabel, card, label
 
 log = get_logger("compile")
 PATH_ROLE = Qt.UserRole
@@ -435,7 +435,7 @@ class CompilePanel(QWidget):
         stop.setProperty("role", "icon")
         stop.clicked.connect(self.player.stop)
         row.addWidget(stop)
-        self.time_label = label("0:00.0 / 0:00.0", "mono")
+        self.time_label = TimeLabel()
         row.addWidget(self.time_label)
         row.addStretch(1)
         self.export_btn = QPushButton("Export Compilation…")

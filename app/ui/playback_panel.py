@@ -24,7 +24,7 @@ from ..utils.shell import FILE_MANAGER, open_folder, reveal
 from ..workers.processing_worker import run_task
 from .audio_player import AudioPlayer
 from .waveform import WaveformOverview, WaveformView
-from .widgets import ElidedLabel, card, label
+from .widgets import ElidedLabel, TimeLabel, card, label
 
 log = get_logger("playback")
 
@@ -197,7 +197,7 @@ class PlaybackPanel(QWidget):
         stop.setProperty("role", "icon")
         stop.clicked.connect(self.player.stop)
         row.addWidget(stop)
-        self.time_label = label("0:00.0 / 0:00.0", "mono")
+        self.time_label = TimeLabel()
         row.addWidget(self.time_label)
         row.addSpacing(10)
         row.addWidget(label("\U0001F50A", "faint"))

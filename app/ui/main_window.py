@@ -46,7 +46,8 @@ from .brand import STUDIO_NAME, AboutDialog, OpenSessionDialog, SessionNameDialo
 from .compile_panel import CompilePanel
 from .playback_panel import PlaybackPanel
 from .update_dialog import UpdateChecker, UpdateDialog
-from .widgets import DropZone, ElidedLabel, MetricsPanel, ThemeToggle, card, label, reserve_bold_width
+from .widgets import (DropZone, ElidedLabel, MetricsPanel, ThemeToggle, TimeLabel, card, label,
+                      reserve_bold_width)
 
 log = get_logger("ui")
 
@@ -646,8 +647,7 @@ class MainWindow(QMainWindow):
         self.stop_btn.setToolTip("Stop")
         self.stop_btn.clicked.connect(self.player.stop)
         lay.addWidget(self.stop_btn)
-        self.time_label = label("0:00.0 / 0:00.0")
-        self.time_label.setProperty("role", "mono")
+        self.time_label = TimeLabel()
         lay.addWidget(self.time_label)
         self.loop_btn = QPushButton("\u27f2 LOOP")
         self.loop_btn.setProperty("role", "toggle")

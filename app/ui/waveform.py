@@ -121,8 +121,12 @@ class WaveformView(QWidget):
 
     def set_playhead(self, seconds: float):
         if abs(seconds - self.playhead) > 1e-4:
+            # a full repaint costs ~15 ms: only when the playhead reaches another pixel
+            dpr = self.devicePixelRatioF()
+            moved = round(self._t_to_x(seconds) * dpr) != round(self._t_to_x(self.playhead) * dpr)
             self.playhead = seconds
-            self.update()
+            if moved:
+                self.update()
 
     def set_selection(self, sel: tuple[float, float] | None):
         self.selection = sel

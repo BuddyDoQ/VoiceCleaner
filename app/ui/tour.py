@@ -141,6 +141,9 @@ WHATS_NEW = [
          "recording, even after the voice is turned up. Export after Enhance Again saves the new "
          "result, and only asks about changed settings when you really changed them.",
          tab=0, target=lambda w: _visible(w.wave_enh), version="1.1.9"),
+    Step("Smooth Compile preview",
+         "The compilation preview plays smoothly however many takes are in the list.",
+         tab=2, target=lambda w: _visible(w.compile_panel.wave), version="1.1.10"),
 ]
 
 

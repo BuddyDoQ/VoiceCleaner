@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.10
+
+- **Smooth Compile preview.** With many takes in the Compile list, the preview could stutter.
+  The time readout under the waveform changes ten times a second, and each change redrew
+  the whole tab, every take in the list included, leaving too little time for the audio.
+  The readout now keeps its size, so only the readout itself is redrawn, and the waveform
+  is redrawn only when the playhead moves. Playback in the Enhance and Playback tabs
+  benefits too.
+
 ## 1.1.9
 
 - **Noises are no longer mistaken for speech.** On recordings with little dynamic range (a

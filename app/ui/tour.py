@@ -136,6 +136,11 @@ WHATS_NEW = [
          "The first Play of a session starts right away now. Audio output (in the ⋯ menu) lists "
          "the outputs in use first; ones that are not connected are under Inactive.",
          target=lambda w: w.menu_btn, version="1.1.8"),
+    Step("Quieter pauses",
+         "The background between your words never comes out louder than in the original "
+         "recording, even after the voice is turned up. Export after Enhance Again saves the new "
+         "result, and only asks about changed settings when you really changed them.",
+         tab=0, target=lambda w: _visible(w.wave_enh), version="1.1.9"),
 ]
 
 

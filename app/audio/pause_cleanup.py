@@ -38,6 +38,27 @@ PROTECT_CONTRAST_DB = 8.0  # ... when it stands out this far from the pause's ow
 PROTECT_HOLD_S = 0.04  # protection reaches this far either side of such a sound
 
 
+def pause_frames(speech_mask: np.ndarray, n_frames: int, mask_hop_s: float) -> np.ndarray:
+    """Frames inside pauses: away from speech by the guards, and only pauses of at least
+    MIN_PAUSE_S (shorter gaps between words are left alone)."""
+    speech = np.zeros(n_frames, bool)
+    m = min(n_frames, speech_mask.shape[0])
+    speech[:m] = speech_mask[:m]
+    pre, post = int(round(PRE_GUARD_S / mask_hop_s)), int(round(POST_GUARD_S / mask_hop_s))
+    guarded = speech.copy()
+    if post:
+        guarded |= ndimage.binary_dilation(speech, structure=np.r_[np.zeros(post), np.ones(post + 1)].astype(bool))
+    if pre:
+        guarded |= ndimage.binary_dilation(speech, structure=np.r_[np.ones(pre + 1), np.zeros(pre)].astype(bool))
+    labels, _count = ndimage.label(~guarded)
+    min_len = int(round(MIN_PAUSE_S / mask_hop_s))
+    out = np.zeros(n_frames, bool)
+    for sl in ndimage.find_objects(labels):
+        if sl[0].stop - sl[0].start >= min_len:
+            out[sl[0]] = True
+    return out
+
+
 @dataclass
 class PauseCleanupParams:
     amount: float = 0.6  # 0..1, 0 = off
@@ -82,19 +103,10 @@ class PauseCleaner:
         # speech level: energy mean over speech frames (what a listener calls "the voice level")
         speech_db = float(10 * np.log10(np.mean(10 ** (level[sp] / 10))))
 
-        pre, post = int(round(PRE_GUARD_S / mask_hop_s)), int(round(POST_GUARD_S / mask_hop_s))
-        guarded = speech.copy()
-        if post:
-            guarded |= ndimage.binary_dilation(speech, structure=np.r_[np.zeros(post), np.ones(post + 1)].astype(bool))
-        if pre:
-            guarded |= ndimage.binary_dilation(speech, structure=np.r_[np.ones(pre + 1), np.zeros(pre)].astype(bool))
-        labels, count = ndimage.label(~guarded)
-        min_len = int(round(MIN_PAUSE_S / mask_hop_s))
+        labels, _count = ndimage.label(pause_frames(speech_mask, n_frames, mask_hop_s))
         target = speech_db - self.p.depth_db
-        for i, sl in enumerate(ndimage.find_objects(labels), 1):
+        for sl in ndimage.find_objects(labels):
             idx = sl[0]
-            if idx.stop - idx.start < min_len:
-                continue
             lv = level[idx][live[idx]]
             if lv.size == 0:
                 continue  # digital silence: nothing to turn down

@@ -927,6 +927,21 @@ class MainWindow(QMainWindow):
     def _task_running(self) -> bool:
         return self.task is not None and self.task.running
 
+    def _when_task_done(self, fn):
+        """Run ``fn`` once the current task has fully finished. A task's success callback runs
+        before its thread has ended, while it still counts as running, so work started from
+        there (an export after Enhance) would find the app busy and not start."""
+        task = self.task
+        if task is None or not task.running:
+            QTimer.singleShot(0, fn)
+            return
+
+        def go():
+            task.finished.disconnect(go)
+            fn()
+
+        task.finished.connect(go)
+
     def _error(self, title: str, message: str):
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Warning)
@@ -1195,15 +1210,17 @@ class MainWindow(QMainWindow):
             mm = self._get_model_manager()
             result = EnhancementPipeline(mm).run(audio, analysis, settings, ctx, learned_profile=profile)
             overview = WaveformOverview.compute(result.samples, result.sample_rate)
-            return result, overview
+            return result, overview, settings
 
         self.task = run_task(work, self, on_success=self._enhanced, on_error=self._task_failed,
                              on_progress=self._on_progress)
 
     def _enhanced(self, payload):
-        result, overview = payload
+        result, overview, requested = payload
         self.result = result
-        self._result_settings = result.settings.to_dict()
+        # compare against what was asked for: the quality check may have adjusted result.settings,
+        # which would otherwise make the panel look changed forever
+        self._result_settings = requested.to_dict()
         self._enh_overview = overview
         self._clear_preview()
         pos = self.player.position
@@ -1228,9 +1245,10 @@ class MainWindow(QMainWindow):
             f"{result.realtime_factor:.1f}x realtime • {result.device_label}")
         if result.attempts > 1:
             self.speed_label.setText(self.speed_label.text() + f" • Quality check adjusted settings ({result.attempts} passes).")
+        self._update_enhance_state(self.settings_panel.current())  # back to "Enhance", unless changed meanwhile
         if self._export_after_enhance is not None:
             then, self._export_after_enhance = self._export_after_enhance, None
-            QTimer.singleShot(0, then)
+            self._when_task_done(then)
 
     def cancel_task(self):
         if self._task_running():
@@ -1243,6 +1261,10 @@ class MainWindow(QMainWindow):
         if self.batch_panel.preview_on and self.batch_panel.preview_path is not None \
                 and self.tabs.currentWidget() is self.batch_page:
             self._bp_timer.start()  # the batch sample follows the settings
+        self._update_enhance_state(s)
+
+    def _update_enhance_state(self, s: ProcessingSettings):
+        """Show Enhance Again while the settings differ from those of the enhanced track."""
         if self.result is not None and self._result_settings is not None:
             # pause shortening happens on export, so it never requires enhancing again
             now = {k: v for k, v in s.to_dict().items() if k not in self.PAUSE_FIELDS}
@@ -1998,7 +2020,7 @@ class MainWindow(QMainWindow):
             self._exported_edits = edits
             self._exported(path)
             if callable(then):
-                then()
+                self._when_task_done(then)
 
         self.task = run_task(work, self, on_success=saved, on_error=self._task_failed,
                              on_progress=self._on_progress)

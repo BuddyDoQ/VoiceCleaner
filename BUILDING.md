@@ -203,6 +203,7 @@ app/
     compile.py            take trimming, edits and joining (Compile tab)
     pauses.py             long-pause detection and shortening
     limiter.py            true-peak lookahead limiter
+    gap_guard.py          keeps pauses from ending up louder than in the original
     quality.py            before/after metrics, QC checks, clarity estimate
     settings.py           settings, presets, automatic configuration
     pipeline.py           orchestration, chunking, QC retry loop

@@ -99,7 +99,7 @@ def test_off_and_without_speech_leaves_audio_unchanged():
     assert np.all(y == 0)
 
 
-def test_pipeline_pauses_even_and_on_target():
+def test_pipeline_pauses_even_and_on_target(monkeypatch):
     """Lead-in and trailing pause of the finished file stay within 3 dB of each other."""
     x, _ = _take()
     audio = AudioData(x.astype(np.float32), SR)
@@ -108,6 +108,11 @@ def test_pipeline_pauses_even_and_on_target():
     result = EnhancementPipeline(None).run(audio, a, s)
     lead, tail = _pauses(result.samples)
     assert abs(tail - lead) < 3.0
+    # pause clean-up itself does it: without it (and without the gap guard, which would
+    # otherwise bring the pauses down to the original's level) they stay louder
+    from app.audio import gap_guard
+
+    monkeypatch.setattr(gap_guard.GapGuard, "process", lambda self, original, x, *a: x)
     off = EnhancementPipeline(None).run(audio, a, s.copy(pause_cleanup=0.0))
     lead_off, tail_off = _pauses(off.samples)
     assert tail < tail_off - 3 and lead < lead_off - 3

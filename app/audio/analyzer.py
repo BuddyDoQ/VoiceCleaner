@@ -30,6 +30,18 @@ log = get_logger("analyzer")
 FRAME_HOP_S = 0.01
 DIGITAL_SILENCE_DB = -100.0
 
+# Voicing: vowels repeat at the speaker's pitch, most noises do not. A stretch marked as
+# speech by level and flatness that has (almost) no pitched frames is a noise (a rumble,
+# a knock, handling) - unless the whole recording has little pitch (whispering).
+VOICED_CORR = 0.6  # normalized autocorrelation at the pitch period for a "pitched" frame
+UNVOICED_SPAN_S = 0.3  # stretches at least this long ...
+UNVOICED_SHARE = 0.1  # ... with fewer pitched frames than this are not speech
+MIN_VOICED_SHARE = 0.2  # whisper safeguard: only when at least this much of the speech is pitched
+# Breathy or whispered words have little pitch too, but carry their sound in the upper mids
+# (breath, "h", "s"; centre around 1.2 kHz and up); the noises this is for - rumble, knocks,
+# handling - sit low (around 0.5 kHz). Only an unpitched stretch centred below this is dropped.
+UNVOICED_MAX_CENTROID_HZ = 900.0
+
 
 @dataclass
 class StereoInfo:
@@ -155,16 +167,20 @@ def analyze(samples: np.ndarray, sr: int, progress=None) -> AnalysisResult:
     speech_band = band_edges_bins(freqs, 300, min(4000, sr / 2 - 1))
     full_band = band_edges_bins(freqs, 80, min(16000, sr / 2 - 1))
 
-    level, flatness = [], []
+    level, flatness, centroid = [], [], []
     for _, power in iter_power_frames(mono, nfft, hop):
-        level.append(db(power[:, full_band].sum(axis=1)))
+        full = power[:, full_band]
+        level.append(db(full.sum(axis=1)))
         sb = power[:, speech_band] + EPS
         flatness.append(np.exp(np.mean(np.log(sb), axis=1)) / np.mean(sb, axis=1))
+        centroid.append((full * freqs[full_band]).sum(axis=1) / (full.sum(axis=1) + EPS))
     level_db = np.concatenate(level)
     flatness = np.concatenate(flatness)
+    centroid = np.concatenate(centroid)
     report(0.45)
 
-    speech_mask, noise_mask = voice_activity(level_db, flatness)
+    pitch = voicing(mono, sr, hop, level_db.shape[0])
+    speech_mask, noise_mask = voice_activity(level_db, flatness, pitch, centroid)
     speech_fraction = float(speech_mask.mean()) if speech_mask.size else 0.0
 
     # Pass 2: long-term spectra
@@ -275,12 +291,60 @@ def analysis_mono(samples: np.ndarray, stereo: StereoInfo) -> np.ndarray:
     return out
 
 
-def voice_activity(level_db: np.ndarray, flatness: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def voicing(mono: np.ndarray, sr: int, hop: int, n_frames: int) -> np.ndarray:
+    """Pitch strength per frame (0..1): the best normalized autocorrelation over 40 ms at
+    lags for 70-400 Hz, on the 70-1000 Hz band at about 8 kHz. Streams through ``mono``,
+    so disk-backed recordings are never loaded whole."""
+    out = np.zeros(n_frames, np.float32)
+    if n_frames == 0 or mono.shape[0] == 0:
+        return out
+    k = max(1, int(sr // 8000))
+    dr = sr / k
+    sos = signal.butter(4, [70.0, min(1000.0, 0.45 * dr)], "bandpass", fs=sr, output="sos")
+    win, lo, hi = int(0.04 * dr), int(dr / 400), int(dr / 70) + 1
+    need = win + hi
+    nfft = next_pow2(need + win)
+    starts = np.round(np.arange(n_frames) * hop / k).astype(np.int64)
+    zi = np.zeros((sos.shape[0], 2))
+    buf, buf0, done = np.zeros(0), 0, 0
+    block = k * (1 << 18)
+    total = mono.shape[0]
+    for a in range(0, total, block):
+        y, zi = signal.sosfilt(sos, np.asarray(mono[a : a + block], dtype=np.float64), zi=zi)
+        buf = np.concatenate([buf, y[::k]])
+        last = a + block >= total
+        if last:
+            buf = np.concatenate([buf, np.zeros(need)])
+        # every frame whose window is complete in the buffer
+        end = done + int(np.searchsorted(starts[done:], buf0 + buf.shape[0] - need, side="right"))
+        for f0 in range(done, end, 2048):
+            f1 = min(end, f0 + 2048)
+            idx = starts[f0:f1] - buf0
+            seg = buf[idx[:, None] + np.arange(need)]
+            spec = np.fft.rfft(seg, nfft, axis=1)
+            head = np.fft.rfft(seg[:, :win], nfft, axis=1)
+            num = np.fft.irfft(spec * np.conj(head), nfft, axis=1)[:, lo:hi]
+            c = np.concatenate([np.zeros((seg.shape[0], 1)), np.cumsum(seg**2, axis=1)], axis=1)
+            e_lag = c[:, lo + win : hi + win] - c[:, lo:hi]
+            e0 = c[:, win : win + 1]
+            r = num / np.sqrt(e0 * e_lag + 1e-20)
+            out[f0:f1] = np.clip(r.max(axis=1), 0.0, 1.0)
+        done = end
+        if done < n_frames:
+            keep = int(starts[done]) - buf0
+            buf, buf0 = buf[keep:], buf0 + keep
+    return out
+
+
+def voice_activity(level_db: np.ndarray, flatness: np.ndarray, pitch: np.ndarray | None = None,
+                   centroid: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """Classify frames into speech / background-only (plus an uncertain middle).
 
     Background is estimated from the low percentiles of the level histogram;
     speech must rise clearly above it and be less noise-like (lower spectral
-    flatness). Masks are smoothed with hangover so syllable gaps stay speech.
+    flatness). With ``pitch`` (see ``voicing``), stretches without pitched frames
+    are not speech either, unless ``centroid`` (spectral centre per frame, Hz) shows
+    they sound like breath rather than a low noise. Masks are smoothed with hangover so syllable gaps stay speech.
     """
     if level_db.size == 0:
         return np.zeros(0, bool), np.zeros(0, bool)
@@ -301,7 +365,9 @@ def voice_activity(level_db: np.ndarray, flatness: np.ndarray) -> tuple[np.ndarr
     # drop blips < 80 ms: a click smeared by the 40 ms analysis window spans ~50 ms,
     # while real speech (syllables bridged above) always lasts longer
     speech = ndimage.binary_opening(speech, structure=np.ones(8))
-    speech_wide = ndimage.binary_dilation(speech, structure=np.ones(31))  # 150 ms hangover each side
+    if pitch is not None:
+        speech = _drop_unvoiced(speech, pitch, level_db, centroid)
+    speech_wide = ndimage.binary_dilation(speech, structure=np.ones(31))  # 150 ms hangover each side (quality.SPEECH_HANGOVER_FRAMES)
 
     noise = (level_db < noise_thr) & ~speech_wide
     noise = ndimage.binary_opening(noise, structure=np.ones(10))  # only runs >= 100 ms
@@ -311,6 +377,43 @@ def voice_activity(level_db: np.ndarray, flatness: np.ndarray) -> tuple[np.ndarr
         quiet = level_db <= np.percentile(level_db, 5)
         noise = quiet & ~ndimage.binary_dilation(speech, structure=np.ones(5))
     return speech_wide, noise
+
+
+def _drop_unvoiced(speech: np.ndarray, pitch: np.ndarray, level_db: np.ndarray | None = None,
+                   centroid: np.ndarray | None = None) -> np.ndarray:
+    """Speech frames minus stretches of UNVOICED_SPAN_S or more with (almost) no pitch whose
+    sound sits low (with ``centroid``; without it, any such stretch)."""
+    n = min(speech.size, pitch.size)
+    voiced = np.zeros(speech.size, bool)
+    voiced[:n] = pitch[:n] > VOICED_CORR
+    if speech.sum() < 50 or voiced[speech].mean() < MIN_VOICED_SHARE:
+        return speech  # little pitch anywhere (whispering): level and flatness decide alone
+    span = int(round(UNVOICED_SPAN_S / FRAME_HOP_S))
+    share = ndimage.uniform_filter1d(voiced.astype(np.float32), span, mode="nearest")
+    unvoiced = ndimage.binary_opening(share < UNVOICED_SHARE, structure=np.ones(span))
+    # the smoothing window keeps a neighbouring word in view for half its length: reach back
+    # up to the pitched frames themselves (the hangover added afterwards keeps word endings)
+    near_voiced = ndimage.binary_dilation(voiced, structure=np.ones(5))
+    unvoiced = ndimage.binary_dilation(unvoiced, structure=np.ones(span // 2 * 2 + 1)) & ~near_voiced
+    unvoiced = ndimage.binary_opening(unvoiced, structure=np.ones(span))
+    # only a stretch the detector took for speech over UNVOICED_SPAN_S: an unpitched pause that
+    # merely touches a word's edge (its final consonant) is left to the hangover
+    labels, count = ndimage.label(unvoiced)
+    drop = np.zeros_like(speech)
+    for sl in ndimage.find_objects(labels):
+        if speech[sl].sum() < span:
+            continue
+        if centroid is not None and level_db is not None:
+            # the centre of the stretch's sound, loud frames counting most
+            sp = speech[sl]
+            w = 10 ** (level_db[sl][sp] / 10)
+            centre = float(np.sum(centroid[sl][sp] * w) / (np.sum(w) + EPS))
+            if centre >= UNVOICED_MAX_CENTROID_HZ:
+                continue  # breathy or whispered words
+        drop[sl] = True
+    if not drop.any():
+        return speech
+    return ndimage.binary_opening(speech & ~drop, structure=np.ones(8))
 
 
 def _speech_like(flatness: np.ndarray, speech_mask: np.ndarray) -> bool:

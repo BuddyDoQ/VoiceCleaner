@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.1.9
+
+- **Noises are no longer mistaken for speech.** On recordings with little dynamic range (a
+  noisy tape, a quiet room mic), a rumble, knock or handling noise as loud as the voice
+  could count as speech, so noise reduction, pause clean-up and the quality check all left it
+  alone (and the quality check read its removal as lost speech, retrying for nothing). The
+  speech detector now also listens for pitch: vowels repeat at the speaker's pitch, most
+  noises do not, so a low-sounding stretch of 0.3 s or more without pitch is background.
+  Short unpitched sounds inside words (an "s", a "t") stay speech, and so do breathy or
+  whispered words, which carry their sound higher up (breath, "h", "s"); on a whispered
+  recording, which has little pitch anywhere, the check stays out of it entirely. The
+  quality check's "speech loss" measure now looks at the core of each phrase only, not the
+  short margin kept beside words: next to a loud noise that margin holds the noise, and
+  removing it was counted as lost speech, so strong presets (Extreme Noise) retried for nothing. On a test tape, three such noises came
+  out 7-30 dB quieter than before, and Enhance needed one pass instead of three.
+- **Pauses never louder than the original.** Turning the voice up to the loudness target
+  turned up whatever background was left between words too: hiss that grew in the highs
+  while the rumble below was removed, or a rustle or click in a pause, could come out louder
+  than in the recording. A last step now compares the finished result with the original in
+  the pauses, band by band, and turns down anything that came out louder (fading in the
+  guard zones beside the words, so speech is never touched). Live preview does the same.
+  The quality check also reports pauses that got louder ("background between words ... dB
+  louder than the original") and, if it happens, retries with firmer pause clean-up.
+- **Export after Enhance Again, fixed.** *Enhance and Export* now exports the newly enhanced
+  recording instead of asking again. The "Your settings changed since the last Enhance" prompt
+  only appears when they really changed: before, whenever the quality check adjusted a setting
+  during Enhance, VoiceCleaner treated the settings as changed and asked on every export.
+
 ## 1.1.8
 
 - **Plays at once.** On some PCs the first Play of a session took a few seconds and showed a

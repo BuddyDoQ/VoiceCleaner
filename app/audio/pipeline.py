@@ -31,6 +31,7 @@ from .denoise import DenoiseParams, SpectralDenoiser, TransientSuppressor
 from .dereverb import DereverbParams, Dereverberator
 from .dsp import process_in_chunks
 from .eq import CleanupFilter, CleanupParams, VoiceEQ, VoiceEQParams, choose_highpass
+from .gap_guard import GapGuard
 from .leveler import Leveler, LevelerParams
 from .limiter import LimiterParams, TruePeakLimiter
 from .loader import AudioData, allocate
@@ -210,7 +211,7 @@ class EnhancementPipeline:
             else:
                 # without speech, "normalising" would only turn the background back up
                 target = (analysis.lufs if np.isfinite(analysis.lufs) else -23.0) - channel_offset
-            mastered = self._master(restored, sr, settings, prog, disk, target, analysis)
+            mastered = self._master(restored, sr, settings, prog, disk, target, analysis, original=audio.samples)
             output = self._channel_output(mastered, audio.channels)
             if not settings.quality_control:
                 break
@@ -238,10 +239,11 @@ class EnhancementPipeline:
         if (self.model_manager and settings.resynthesis > 0.01
                 and self.model_manager.resynth_device != self.model_manager.device):
             device_label += f" + {self.model_manager.resynth_device.label} (re-synthesis)"
+        gap_stage = [f"pauses kept at original level (up to -{self.last_gap_cut_db:.1f} dB)"]             if getattr(self, "last_gap_cut_db", 0.0) > 0.5 else []
         result = PipelineResult(
             samples=output, sample_rate=sr, settings=settings,
             original_metrics=original_metrics, enhanced_metrics=enhanced_metrics, qc=qc_report,
-            attempts=attempt, stages=restore_info.get("stages", []), notes=notes + restore_info.get("notes", []),
+            attempts=attempt, stages=restore_info.get("stages", []) + gap_stage, notes=notes + restore_info.get("notes", []),
             processing_seconds=elapsed, device_label=device_label,
             model_name=restore_info.get("model"), noise_profile=restore_info.get("profile", "none"),
             eq_bands=restore_info.get("eq_bands", []), auto_eq_bands=restore_info.get("auto_eq_bands", []),
@@ -289,7 +291,8 @@ class EnhancementPipeline:
         full_lufs = analysis.lufs
         win_lufs = loudness.integrated_loudness(np.asarray(audio.samples[a:b], dtype=np.float32), sr)
         offset = float(win_lufs - full_lufs) if np.isfinite(win_lufs) and np.isfinite(full_lufs) else 0.0
-        mastered = self._master(restored, sr, s, prog, False, target, part, loudness_offset_db=offset)
+        mastered = self._master(restored, sr, s, prog, False, target, part, loudness_offset_db=offset,
+                                original=audio.samples[a:b])
         out = self._channel_output(mastered, audio.channels)[core_a - a : core_b - a]
         if ctx is not None:
             ctx.progress(1.0, "Preview ready")
@@ -534,10 +537,12 @@ class EnhancementPipeline:
 
     # --- mastering ----------------------------------------------------------------------
     def _master(self, x: np.ndarray, sr: int, s: ProcessingSettings, prog: _Progress, disk: bool,
-                target: float, analysis: AnalysisResult, loudness_offset_db: float = 0.0) -> np.ndarray:
+                target: float, analysis: AnalysisResult, loudness_offset_db: float = 0.0,
+                original: np.ndarray | None = None) -> np.ndarray:
         """``loudness_offset_db``: for a preview window, how much louder the window is than
         the whole recording; loudness is then judged as for the whole file, so the window
-        gets the gain the full run would give it."""
+        gets the gain the full run would give it. ``original``: the same span of the source
+        recording; the pauses of the result never end up louder than in it."""
         n, ch = x.shape
         step = 1 << 20
         prog("dynamics", 0.0, "Balancing levels...")
@@ -588,6 +593,15 @@ class EnhancementPipeline:
             for a in range(0, n, step):
                 y[a : a + step] *= g
             prog("limiter", (i + 1) / 3, "Limiting peaks...")
+        # last, so it sees the final gain: what the gain lifted in the pauses comes back down
+        self.last_gap_cut_db = 0.0
+        if original is not None:
+            guard = GapGuard(sr)
+            guard.process(original, z, analysis.speech_mask, FRAME_HOP_S)
+            self.last_gap_cut_db = guard.max_cut_applied_db
+            if guard.frames_cut:
+                log.info("Gap guard: pauses turned down to the original's level (%d frames, up to %.1f dB)",
+                         guard.frames_cut, guard.max_cut_applied_db)
         prog("limiter", 1.0, "Limiting peaks...")
         return z
 

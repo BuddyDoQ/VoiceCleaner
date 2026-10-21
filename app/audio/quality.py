@@ -20,6 +20,7 @@ from scipy import ndimage
 from . import loudness
 from .analyzer import FRAME_HOP_S, AnalysisResult, analysis_mono, analyze_stereo
 from .dsp import EPS, analysis_fft_size, band_average, band_edges_bins, db, iter_power_frames, third_octave_centers
+from .gap_guard import gap_rise
 from .settings import ProcessingSettings
 
 
@@ -152,6 +153,10 @@ def original_metrics(samples: np.ndarray, sr: int, analysis: AnalysisResult) -> 
     )
 
 
+SPEECH_HANGOVER_FRAMES = 31  # analyzer.voice_activity widens speech by this (150 ms each side)
+PAUSE_RISE_LIMIT_DB = 2.0  # the gap guard holds pauses to +1 dB; more means it could not
+
+
 def check(original: np.ndarray, enhanced: np.ndarray, sr: int, analysis: AnalysisResult,
           settings: ProcessingSettings, enhanced_metrics: SignalMetrics | None = None) -> tuple[QCReport, _Frames]:
     """Run all checks. Returns the report and the enhanced frame features."""
@@ -170,8 +175,12 @@ def check(original: np.ndarray, enhanced: np.ndarray, sr: int, analysis: Analysi
     # Only syllable nuclei count (frames within 6 dB of their local +-100 ms
     # maximum): those are dominated by direct sound, whereas reverb tails,
     # which de-reverb legitimately removes, sit well below the nuclei.
+    # Only the core of each speech stretch counts, not the 150 ms hangover the detector adds
+    # either side: beside a loud noise (which the detector does not take for speech) that
+    # margin holds the noise, and removing it is not lost speech.
     nuclei = o_lv >= ndimage.maximum_filter1d(o_lv, size=21, mode="nearest") - 6.0
-    strong = sm & nuclei & (o_lv > max(analysis.speech_level_dbfs - 12, analysis.noise_floor_dbfs + 10))
+    core = ndimage.binary_erosion(sm, structure=np.ones(SPEECH_HANGOVER_FRAMES), border_value=1)
+    strong = core & nuclei & (o_lv > max(analysis.speech_level_dbfs - 12, analysis.noise_floor_dbfs + 10))
     ref = strong if strong.sum() > 20 else sm
     offset = float(np.median(e_lv[ref] - o_lv[ref]))  # overall gain change
     rep.stats["gain_db"] = offset
@@ -208,14 +217,20 @@ def check(original: np.ndarray, enhanced: np.ndarray, sr: int, analysis: Analysi
         if np.isfinite(hf_share_enh) and hf_share_enh > -1.0 and e_full > o_full - 3:
             rep.issues.append(QCIssue("hf_artifacts", "high-frequency artefacts in pauses"))
 
-    # 4. over-compression
+    # 4. pauses louder than in the original (in any band): turned-up hiss or noises between words
+    rise = gap_rise(original, enhanced, sr, analysis.speech_mask, FRAME_HOP_S).worst_db()
+    rep.stats["pause_rise_db"] = rise
+    if rise > PAUSE_RISE_LIMIT_DB:
+        rep.issues.append(QCIssue("louder_pauses", f"background between words {rise:.1f} dB louder than the original"))
+
+    # 5. over-compression
     em = enhanced_metrics or measure(enhanced, sr, analysis, enh)
     # leveling narrows the range on purpose; only a nearly flat result is a problem
     if analysis.loudness_range_lu > 4 and em.loudness_range_lu < min(0.3 * analysis.loudness_range_lu, 2.0):
         rep.issues.append(QCIssue("over_compressed",
                                   f"dynamic range reduced from {analysis.loudness_range_lu:.1f} to {em.loudness_range_lu:.1f} LU"))
 
-    # 5. excessive gain (very quiet source pushed hard: noise comes up too)
+    # 6. excessive gain (very quiet source pushed hard: noise comes up too)
     total_gain = em.lufs - analysis.lufs if np.isfinite(em.lufs) and np.isfinite(analysis.lufs) else 0.0
     rep.stats["loudness_gain_db"] = total_gain
     if total_gain > 30:
@@ -254,6 +269,10 @@ def propose_rollback(report: QCReport, s: ProcessingSettings) -> tuple[Processin
         s.resynthesis = round(s.resynthesis * 0.6, 3)
         s.spectral_subtraction = max(1.0, s.spectral_subtraction * 0.85)
         notes.append("reduced high-frequency emphasis")
+    if "louder_pauses" in codes:
+        s.pause_cleanup = round(min(1.0, s.pause_cleanup + 0.2), 3)
+        s.compressor_amount = round(s.compressor_amount * 0.8, 3)
+        notes.append("kept the pauses between words quieter")
     if "over_compressed" in codes:
         s.compressor_amount = round(s.compressor_amount * 0.6, 3)
         s.leveler_amount = round(s.leveler_amount * 0.6, 3)

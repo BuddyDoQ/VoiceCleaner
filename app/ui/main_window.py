@@ -57,6 +57,9 @@ PREVIEW_SETTLE_MS = 600  # live preview starts this long after the last settings
 PREVIEW_SECONDS = 10.0  # length of the live preview around the playhead
 PREVIEW_MAX_SELECTION_S = 30.0  # a longer selection is previewed from its start
 
+MANUAL = Path(__file__).resolve().parents[2] / "docs" / "guide" / "VoiceCleaner-User-Manual.html"
+MANUAL_URL = "https://buddydoq.github.io/VoiceCleaner/guide/VoiceCleaner-User-Manual.html"
+
 SHORTCUTS = [
     ("Space", "Play / pause"),
     ("A", "Listen to the original"),
@@ -71,6 +74,7 @@ SHORTCUTS = [
     ("Ctrl+T", "Teleprompter (its own keys: press H in it)"),
     ("Ctrl+Z / " + REDO_KEYS, "Undo / redo a settings change"),
     ("Esc", "Cancel"),
+    ("F1", "User manual"),
     ("Ctrl+/", "This list"),
     ("Ctrl+mouse wheel", "Zoom the waveform"),
     ("Double-click a slider", "Reset it to the preset's value"),
@@ -358,6 +362,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction("Teleprompter\u2026", self.open_teleprompter, QKeySequence("Ctrl+T"))
         m.addSeparator()
+        m.addAction("User Manual", self._open_manual, QKeySequence("F1"))
         m.addAction("Getting Started", lambda: self.start_tour("basics"))
         m.addAction("What's New", lambda: self.start_tour("news"))
         m.addAction("Keyboard Shortcuts", self._show_shortcuts, QKeySequence("Ctrl+/"))
@@ -2123,6 +2128,11 @@ class MainWindow(QMainWindow):
     # ============================================================================ misc
     def _open_folder(self, path: Path):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def _open_manual(self):
+        # bundled with the app (works offline); the online copy if it is missing
+        url = QUrl.fromLocalFile(str(MANUAL)) if MANUAL.is_file() else QUrl(MANUAL_URL)
+        QDesktopServices.openUrl(url)
 
     def _show_models(self):
         mm = self.model_manager

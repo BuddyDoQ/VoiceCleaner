@@ -16,6 +16,7 @@ uploaded as-is to the GitHub release v<version>):
     VoiceCleaner-GPU-<v>-win64-portable.zip.001   split portable ZIP (open .001 with 7-Zip,
     VoiceCleaner-GPU-<v>-win64-portable.zip.002   or join with copy /b and unzip)
   ffmpeg-source-<version>.tar.gz              source of the LGPL FFmpeg shipped in the app
+  VoiceCleaner-<v>-User-Manual.pdf            the user manual, from docs/guide
   SHA256SUMS.txt, RELEASE_NOTES.md
 
 Neither edition bundles the 490 MB voice re-synthesis model; the app downloads it
@@ -249,6 +250,9 @@ desktop audio), sessions and playback. Works offline.
 - **FFmpeg:** VoiceCleaner ships an LGPL build of FFmpeg to open M4A, AAC, WMA and video files.
   Its source code is attached (`ffmpeg-source-*.tar.gz`).
 
+- **User manual:** [`VoiceCleaner-{v}-User-Manual.pdf`](https://github.com/{REPO}/releases/download/{TAG}/VoiceCleaner-{v}-User-Manual.pdf),
+  also in the app (*User Manual* in the ⋯ menu, `F1`) and [online](https://buddydoq.github.io/VoiceCleaner/guide/VoiceCleaner-User-Manual.html).
+
 Requirements: Windows 10/11 64-bit, 8 GB RAM. GPU edition: NVIDIA driver 570 or newer.
 """
     changes = changelog_entry(APP_VERSION)
@@ -334,6 +338,7 @@ def main():
     from fetch_ffmpeg import fetch_source
 
     fetch_source(OUT)  # LGPL: the source of the FFmpeg we ship, next to it
+    shutil.copy2(ROOT / "docs" / "guide" / "VoiceCleaner-User-Manual.pdf", OUT / f"VoiceCleaner-{APP_VERSION}-User-Manual.pdf")
     write_checksums()
     write_notes()
     for p in sorted(OUT.iterdir()):

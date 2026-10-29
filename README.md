@@ -3,6 +3,8 @@
 **Clean, clear speech from noisy recordings: free, offline, for Windows and Mac.**
 
 **[Download the latest version](https://github.com/BuddyDoQ/VoiceCleaner/releases/latest)** ·
+**[User manual](https://buddydoq.github.io/VoiceCleaner/guide/VoiceCleaner-User-Manual.html)**
+([PDF](docs/guide/VoiceCleaner-User-Manual.pdf)) ·
 by [Steamburger Studios](https://www.steamburgerstudios.com/)
 
 <picture>
@@ -138,6 +140,11 @@ it records.
    enhanced version.
 4. **Export.** The first start shows a short tour of the basics (*Getting Started* in the
    ⋯ menu shows it again).
+
+Every tab, setting and shortcut is explained in the **user manual**: *User Manual* in the
+⋯ menu (`F1`) opens it in your browser, offline. It is also
+[online](https://buddydoq.github.io/VoiceCleaner/guide/VoiceCleaner-User-Manual.html) and
+as a [PDF](docs/guide/VoiceCleaner-User-Manual.pdf), attached to every release too.
 
 The details:
 

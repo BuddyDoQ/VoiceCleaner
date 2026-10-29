@@ -30,6 +30,8 @@ hiddenimports = df_modules + ["libdf", "sounddevice", "_sounddevice_data", "soun
 datas = collect_data_files("soundcard", includes=["*.h"])
 # Steamburger Studios brand assets: logo and fonts (SIL Open Font License)
 datas += [("app/ui/assets/SteamburgerLogoIcon.svg", "app/ui/assets"), ("app/ui/assets/fonts", "app/ui/assets/fonts")]
+# User manual, opened in the browser from the menu (self-contained HTML; the PDF goes on the release page)
+datas += [("docs/guide/VoiceCleaner-User-Manual.html", "docs/guide")]
 
 excludes = [
     "tkinter", "matplotlib", "pytest", "pyloudnorm", "pystoi", "librosa", "numba", "llvmlite",

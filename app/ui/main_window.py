@@ -30,7 +30,7 @@ from ..export.wav_exporter import ExportOptions, export_wav
 from ..utils import update_install, updates, user_presets
 from ..utils.config import APP_NAME, APP_VERSION, UserConfig, edition, log_dir, models_dir, user_models_dir
 from ..utils.logging import get_logger
-from ..utils.shell import REDO_KEYS, reveal, shortcut_text
+from ..utils.shell import HELP_KEYS, REDO_KEYS, reveal, shortcut_text
 from ..workers.batch_worker import BatchOptions, start_batch
 from ..workers.processing_worker import TaskHandle, run_task
 from . import theme
@@ -74,7 +74,7 @@ SHORTCUTS = [
     ("Ctrl+T", "Teleprompter (its own keys: press H in it)"),
     ("Ctrl+Z / " + REDO_KEYS, "Undo / redo a settings change"),
     ("Esc", "Cancel"),
-    ("F1", "User manual"),
+    (HELP_KEYS, "User manual" + (" (also in the Help menu: ⌘?)" if sys.platform == "darwin" else "")),
     ("Ctrl+/", "This list"),
     ("Ctrl+mouse wheel", "Zoom the waveform"),
     ("Double-click a slider", "Reset it to the preset's value"),
@@ -362,7 +362,12 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         m.addAction("Teleprompter\u2026", self.open_teleprompter, QKeySequence("Ctrl+T"))
         m.addSeparator()
-        m.addAction("User Manual", self._open_manual, QKeySequence("F1"))
+        manual = m.addAction("User Manual", self._open_manual, QKeySequence(HELP_KEYS))
+        if sys.platform == "darwin":
+            # macOS keeps Cmd+? for the menu bar's Help menu (it never reaches the window), so the
+            # manual is also there, as in other Mac apps: Cmd+? then shows it
+            help_menu = self.menuBar().addMenu("Help")
+            help_menu.addAction(manual)
         m.addAction("Getting Started", lambda: self.start_tour("basics"))
         m.addAction("What's New", lambda: self.start_tour("news"))
         m.addAction("Keyboard Shortcuts", self._show_shortcuts, QKeySequence("Ctrl+/"))

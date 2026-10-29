@@ -41,6 +41,11 @@ def open_folder(path: Path) -> None:
 # The key Qt calls Backspace is labelled "delete" (⌫) on Mac keyboards.
 BACKSPACE_NAME = "Delete (⌫)" if sys.platform == "darwin" else "Backspace"
 
+# Help: F1 everywhere (fn+F1 on most Mac keyboards). On a Mac, Cmd+? opens the menu bar's
+# Help menu (macOS keeps that key), where the manual is listed.
+HELP_KEYS = "F1"
+MANUAL_WHERE = "the ⋯ menu or the Help menu (⌘?)" if sys.platform == "darwin" else "the ⋯ menu"
+
 # Redo is Ctrl+Y on Windows; macOS has no Cmd+Y redo, its standard is Shift+Cmd+Z
 # (both are bound in the main window through QKeySequence.Redo and Ctrl+Shift+Z).
 REDO_KEYS = "Ctrl+Shift+Z" if sys.platform == "darwin" else "Ctrl+Y"

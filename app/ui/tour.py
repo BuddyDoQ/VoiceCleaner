@@ -17,7 +17,7 @@ from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from ..utils.shell import BACKSPACE_NAME
+from ..utils.shell import BACKSPACE_NAME, HELP_KEYS, MANUAL_WHERE
 from . import theme
 
 # settings saved by versions before the tour existed count as this version
@@ -145,7 +145,7 @@ WHATS_NEW = [
          "The compilation preview plays smoothly however many takes are in the list.",
          tab=2, target=lambda w: _visible(w.compile_panel.wave), version="1.1.10"),
     Step("A user manual",
-         "Every tab, setting and shortcut explained: User Manual in the ⋯ menu, or press F1. "
+         f"Every tab, setting and shortcut explained: User Manual in {MANUAL_WHERE}, or press {HELP_KEYS}. "
          "It opens in your browser and works offline.",
          target=lambda w: w.menu_btn, version="1.1.11"),
 ]

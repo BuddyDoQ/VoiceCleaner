@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.11
+
+- **User manual.** Every tab, setting and shortcut explained, with pictures. *User Manual*
+  in the ⋯ menu (or `F1`) opens it in your browser, offline. It is also
+  [online](https://buddydoq.github.io/VoiceCleaner/guide/VoiceCleaner-User-Manual.html) and
+  attached to every release as a PDF.
+
 ## 1.1.10
 
 - **Smooth Compile preview.** With many takes in the Compile list, the preview could stutter.

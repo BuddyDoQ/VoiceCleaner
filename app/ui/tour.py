@@ -144,6 +144,10 @@ WHATS_NEW = [
     Step("Smooth Compile preview",
          "The compilation preview plays smoothly however many takes are in the list.",
          tab=2, target=lambda w: _visible(w.compile_panel.wave), version="1.1.10"),
+    Step("A user manual",
+         "Every tab, setting and shortcut explained: User Manual in the ⋯ menu, or press F1. "
+         "It opens in your browser and works offline.",
+         target=lambda w: w.menu_btn, version="1.1.11"),
 ]
 
 

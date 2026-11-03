@@ -83,3 +83,45 @@ def test_batch_lists_the_saved_file_in_its_own_column(window, tmp_path):
     assert bp.table.item(0, COL_OUTPUT).text() == "take enhanced.wav"
     assert bp.table.item(0, COL_STATUS).text() == "✓ Complete (9.0x realtime)"
     assert not bp._bar(0).isVisibleTo(bp.table)
+
+
+def test_noise_profile_sits_under_noise_reduction_and_not_in_batch(window):
+    panel = window.settings_panel
+    assert window.learn_btn.parent() is panel.noise_extra
+    panel.set_context("batch")
+    assert not panel.noise_extra.isVisibleTo(panel)
+    panel.set_context("enhance")
+    assert panel.noise_extra.isVisibleTo(panel)
+
+
+def test_header_engine_readout_only_when_it_needs_attention(window):
+    window._show_engine_readout(False)
+    assert not window.device_chip.isVisibleTo(window)
+    window._show_engine_readout(True)
+    assert window.device_chip.isVisibleTo(window) and window.model_chip.isVisibleTo(window)
+    assert "·" in window.engine_summary()
+
+
+def test_increase_contrast_strengthens_secondary_text_and_borders(window):
+    from app.ui import theme
+
+    window.set_theme("night")
+    window.set_contrast("auto")
+    normal = (theme.FAINT, theme.BORDER_STRONG, theme.TRACK)
+    window.set_contrast("high")
+    assert theme.HIGH and (theme.FAINT, theme.BORDER_STRONG, theme.TRACK) == tuple(
+        theme.HIGH_CONTRAST["night"][k] for k in ("FAINT", "BORDER_STRONG", "TRACK"))
+    assert window.config.extra["contrast"] == "high"
+    window.set_contrast("auto")
+    assert (theme.FAINT, theme.BORDER_STRONG, theme.TRACK) == normal
+
+
+def test_tour_pauses_mac_menu_keys_too(window):
+    from app.ui.mac_menu import build_menu_bar
+
+    build_menu_bar(window)
+    play = next(a for a in window._menu_commands if a.text() == "Play / Pause")
+    window.start_tour("basics")
+    assert not play.isEnabled()
+    window._tour.close_tour()
+    assert play.isEnabled()

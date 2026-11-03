@@ -17,6 +17,13 @@
   the Batch list shows the saved file in its own *Saved As* column.
 - **Fewer pop-ups:** hints for *Learn Noise Profile* appear at the button, and a finished
   update is reported in the status line instead of an alert.
+- **Increased contrast:** when the system asks for it (Windows contrast themes, macOS
+  Increase Contrast), or with *Always increase contrast* in Settings, secondary text,
+  borders and slider tracks are stronger. Slider tracks are easier to see in any case.
+- **Calmer header:** the processor and AI model show there only while loading or when
+  something needs attention; otherwise they are in Settings (*In use*).
+- **Learn Noise Profile** moved from the playback controls to the sidebar, under Noise
+  Reduction. The update window leads with the news ("VoiceCleaner 1.1.12 is available").
 - **Mac menu bar:** File, Edit, Playback, View, Window and Help menus with every command
   and its keys; About, Settings… and Check for Updates… are in the VoiceCleaner menu.
 

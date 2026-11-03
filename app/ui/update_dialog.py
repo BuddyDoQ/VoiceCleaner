@@ -123,7 +123,8 @@ class UpdateDialog(QDialog):
         words = QVBoxLayout()
         words.setSpacing(2)
         title = QLabel(f"VoiceCleaner {release.version} is available")
-        title.setProperty("role", "section")
+        title.setProperty("role", "h2")  # the news is the headline; it was the faintest line
+        title.setAccessibleName(title.text())
         words.addWidget(title)
         when = f"Released {release.published}. " if release.published else ""
         sub = QLabel(f"{when}You have version {APP_VERSION}.")

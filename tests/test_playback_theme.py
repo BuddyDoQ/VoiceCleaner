@@ -104,6 +104,7 @@ def test_text_meets_contrast_minimums_in_both_themes():
                 assert _contrast(palette[token], bg) >= 4.5, (token, palette[token], bg)
         for bg in panels:
             assert _contrast(palette["CONTROL_BORDER"], bg) >= 3.0, (palette["CONTROL_BORDER"], bg)
+            assert _contrast(palette["TRACK"], bg) >= 3.0, (palette["TRACK"], bg)
 
 
 def test_ticked_check_box_shows_a_tick_and_focus_ring_follows_keyboard():

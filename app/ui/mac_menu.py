@@ -27,6 +27,7 @@ def build_menu_bar(window) -> None:
     w = window
     acts = _by_text(w.session_btn.menu(), w.menu_btn.menu())
     bar = w.menuBar()
+    w._menu_commands = []
 
     def add(menu: QMenu, *names: str | None):
         for n in names:
@@ -40,6 +41,7 @@ def build_menu_bar(window) -> None:
         a.setShortcut(QKeySequence(key))
         a.triggered.connect(lambda _=False: fn())
         menu.addAction(a)
+        w._menu_commands.append(a)  # paused with the window's shortcuts during the tour
         return a
 
     file = bar.addMenu("File")

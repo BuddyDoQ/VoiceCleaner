@@ -42,9 +42,21 @@ class SettingsDialog(QDialog):
         v.setSpacing(6)
 
         self.appearance = self._choices(v, "APPEARANCE", APPEARANCE, window.theme_pref, window.set_theme)
+        self.contrast = QCheckBox("Always increase contrast")
+        self.contrast.setToolTip("Stronger text, borders and slider tracks. It is also on whenever the "
+                                 "system's contrast setting is (Windows contrast themes, macOS Increase Contrast).")
+        self.contrast.setChecked(window.config.extra.get("contrast", "auto") == "high")
+        self.contrast.toggled.connect(lambda on: window.set_contrast("high" if on else "auto"))
+        v.addWidget(self.contrast)
         self.fonts = self._choices(v, "TEXT", FONTS, window.config.extra.get("fonts", "system"), window.set_fonts)
         self.device = self._choices(v, "PROCESSING", _devices(), window.config.device_preference,
                                     window._set_device)
+        # what is in use now (the header shows it only when something needs attention)
+        self.in_use = QLabel()
+        self.in_use.setProperty("role", "faint")
+        self.in_use.setWordWrap(True)
+        v.addWidget(self.in_use)
+        self._show_in_use()
 
         v.addSpacing(10)
         v.addWidget(label("UPDATES", "section"))
@@ -82,6 +94,10 @@ class SettingsDialog(QDialog):
             v.addWidget(row)
         return group
 
+    def _show_in_use(self):
+        summary = getattr(self.window_, "engine_summary", None)
+        self.in_use.setText(f"In use: {summary()}" if summary else "")
+
     def refresh(self):
         """Show the current choices (they can also change from elsewhere, e.g. the teleprompter)."""
         w = self.window_
@@ -92,7 +108,11 @@ class SettingsDialog(QDialog):
                 b.blockSignals(True)
                 b.setChecked(key == current)
                 b.blockSignals(False)
+        self.contrast.blockSignals(True)
+        self.contrast.setChecked(w.config.extra.get("contrast", "auto") == "high")
+        self.contrast.blockSignals(False)
         self.updates.blockSignals(True)
         self.updates.setChecked(bool(w.config.extra.get("update_auto", True)))
         self.updates.blockSignals(False)
+        self._show_in_use()
 

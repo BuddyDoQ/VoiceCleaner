@@ -7,7 +7,10 @@ or device names appear. Re-run it for each release:
     python tools/screenshots.py [output_dir]      (default: docs/screenshots)
 
 Writes <name>-dark.png / <name>-light.png for: enhance, teleprompter, compile, batch,
-settings, update; plus social-preview.png (1280x640) and teleprompter.gif.
+settings, update; plus social-preview.png (1280x640) and teleprompter.gif. The user
+manual's other pictures (start screen, tour, menu, Settings window, record panel, export
+window, Playback tab...) go to <output_dir>/manual; tools/update_manual_images.py puts
+them all into docs/guide/VoiceCleaner-User-Manual.html.
 """
 import hashlib
 import http.server
@@ -180,6 +183,9 @@ def run_theme(app, mode: str, out: Path, shots: dict, gif: bool):
     theme.apply(app, mode)
     fake_mic = InputSource("demo", "USB Microphone", "microphone", 1, True)
     tw.list_sources = lambda: ([fake_mic], [])
+    from app.ui import record_panel
+
+    record_panel.list_sources = lambda: ([fake_mic], [])  # no real device names in pictures
     tw.TeleprompterWindow._make_recorder = lambda self, raw, src: TakeRecorder(raw, src, blocks=fake_blocks)
 
     cfg = UserConfig.load()
@@ -193,6 +199,37 @@ def run_theme(app, mode: str, out: Path, shots: dict, gif: bool):
     pump(app, lambda: w._mm_ready.is_set())
     session = sessions.create("Episode 12")
     w._switch_session(session)
+    manual = shots.setdefault("_manual", {})
+
+    def keep(name, img):
+        manual.setdefault(name, {})[suffix] = img
+
+    # manual: the start screen, the Getting Started tour, the ⋯ menu, the Settings window
+    wait(app, 0.5)
+    keep("start", to_pil(w.grab()))
+    w.start_tour("basics")
+    wait(app, 0.8)
+    keep("tour", to_pil(w.grab()))
+    w._tour.close_tour()
+    wait(app, 0.3)
+    menu = w.menu_btn.menu()
+    menu.popup(w.menu_btn.mapToGlobal(w.menu_btn.rect().bottomLeft()))
+    pump(app, lambda: menu.isVisible(), 10)
+    wait(app, 0.3)
+    keep("menu", to_pil(menu.grab()))
+    menu.hide()
+    w.open_settings()
+    settings_dlg = w._settings_dialog
+    pump(app, lambda: settings_dlg.isVisible(), 10)
+    wait(app, 0.3)
+    keep("settings-window", to_pil(settings_dlg.grab()))
+    settings_dlg.close()
+    # manual: the record panel
+    w.start_new_recording()  # what Record Audio on the start screen does
+    wait(app, 1.0)
+    keep("record", to_pil(w.grab()))
+    w._show_record_panel(False)
+    wait(app, 0.3)
 
     # 1 + 5: Enhance after enhancing; the settings sidebar close-up
     rec = session.recording_path()
@@ -200,12 +237,25 @@ def run_theme(app, mode: str, out: Path, shots: dict, gif: bool):
     sf.write(rec, x, SR, subtype="PCM_24")
     w.open_file(rec)
     pump(app, lambda: w.audio is not None and not w._task_running())
+    wait(app, 0.5)
+    keep("opened", to_pil(w.grab()))
     w.enhance()
     pump(app, lambda: w.result is not None and not w._task_running(), 300)
     w.player.seek(7.2)
     w._on_position(7.2)
     wait(app, 0.5)
     shots.setdefault("enhance", {})[suffix] = to_pil(w.grab())
+    # manual: the export window
+    from app.ui.export_dialog import ExportDialog
+
+    exp = ExportDialog(w.audio.info.path, w.result.sample_rate, str(session.exports_dir), w.config.output_format,
+                       w.config.output_bit_depth, w.config.output_sample_rate, w,
+                       suggested_name=session.export_path(w.audio.info.path).stem)
+    exp.show()
+    pump(app, lambda: exp.isVisible(), 10)
+    wait(app, 0.3)
+    keep("export", to_pil(exp.grab()))
+    exp.close()
     side = to_pil(w.sidebar.grab())
     shots.setdefault("settings", {})[suffix] = side.crop((0, 0, side.width, min(side.height, 640)))
 
@@ -269,6 +319,12 @@ def run_theme(app, mode: str, out: Path, shots: dict, gif: bool):
     pump(app, lambda: w._batch is None and w.batch_panel.outputs, 300)
     wait(app, 0.5)
     shots.setdefault("batch", {})[suffix] = to_pil(w.grab())
+
+    # manual: the Playback tab with this session's recordings
+    w.tabs.setCurrentWidget(w.playback)
+    w.playback.refresh()
+    wait(app, 2.0)
+    keep("playback", to_pil(w.grab()))
 
     # 6: the update window, downloaded and verified
     w.tabs.setCurrentIndex(0)
@@ -349,9 +405,13 @@ def main():
         os.environ[var] = tempfile.mkdtemp(prefix=f"vc_shots_{var.lower()}_")
     os.environ["HOME"] = os.environ["USERPROFILE"]
     run_theme(app, "day", out, shots, gif=False)
+    manual = shots.pop("_manual", {})
     for name, pair in shots.items():
         for suffix, img in pair.items():
             save(img, out / f"{name}-{suffix}.png")
+    for name, pair in manual.items():
+        for suffix, img in pair.items():
+            save(img, out / "manual" / f"{name}-{suffix}.png")
     social_preview(shots["enhance"]["dark"], out)
 
 

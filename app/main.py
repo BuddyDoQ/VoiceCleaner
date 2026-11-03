@@ -120,7 +120,8 @@ def main() -> int:
     app.setApplicationName(APP_NAME)
     app.setStyle("Fusion")
     config = UserConfig.load()
-    theme.apply(app, config.extra.get("theme", "auto"), fonts=config.extra.get("fonts", "system"))
+    theme.apply(app, config.extra.get("theme", "auto"), fonts=config.extra.get("fonts", "system"),
+                contrast=config.extra.get("contrast", "auto"))
 
     class _FinderOpen(QObject):
         """macOS delivers files opened from Finder (double-click, drop on the Dock icon)
@@ -173,6 +174,10 @@ def main() -> int:
     window = MainWindow(config)
     try:  # follow Windows' light/dark setting live when the theme is "Automatic"
         app.styleHints().colorSchemeChanged.connect(window._system_scheme_changed)
+    except AttributeError:
+        pass
+    try:  # and its contrast setting (Windows contrast themes, macOS Increase Contrast)
+        app.styleHints().accessibility().contrastPreferenceChanged.connect(window._system_contrast_changed)
     except AttributeError:
         pass
 

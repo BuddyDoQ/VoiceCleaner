@@ -45,7 +45,7 @@ def palette(mode: str) -> dict:
         "mode": mode, "bg": t["BG"], "text": t["TEXT"], "muted": t["MUTED"], "faint": t["FAINT"],
         "cue": t["WARNING"], "accent": t["ACCENT"], "accent_text": t["ACCENT_TEXT"], "rec": t["RECORD"],
         "panel": QColor(t["SURFACE"]).name(), "panel_alpha": 235, "button": t["SURFACE_2"], "hover": t["SURFACE_3"],
-        "border": t["BORDER_STRONG"], "inset": t["SURFACE_2"], "track": t["SURFACE_3"],
+        "border": t["BORDER_STRONG"], "inset": t["SURFACE_2"], "track": t["TRACK"],
         "shade": "rgba(0,0,0,190)" if night else "rgba(20,20,30,110)",
         "count_bg": "rgba(0,0,0,140)" if night else "rgba(255,255,255,170)",
     }

@@ -34,7 +34,8 @@ NIGHT = {
     "TEXT": "#eeeef8",  # --text-primary
     "MUTED": "#b8b8d0",  # --text-secondary
     "FAINT": "#8a8aa6",  # --text-muted, lifted to 4.7:1 on inset panels (was #6e6e8a, 3.6:1)
-    "CONTROL_BORDER": "#8a8aa6",  # check box outlines: 3:1 or more against what is around them
+    "CONTROL_BORDER": "#8a8aa6",
+    "TRACK": "#6a6a88",  # slider grooves: 3:1 or more on every panel (was SURFACE_3, 1.4:1)  # check box outlines: 3:1 or more against what is around them
     "ACCENT": "#60a5fa",  # --accent-blue  (primary, Enhanced)
     "ACCENT_DARK": "#3b82f6",
     "ACCENT_INK": "#60a5fa",  # accent as text on the page
@@ -63,6 +64,7 @@ DAY = {
     "MUTED": "#363645",
     "FAINT": "#5f5f7a",  # 5.1:1 on inset panels (was #6e6e8a, 4.0:1)
     "CONTROL_BORDER": "#6e6e8a",
+    "TRACK": "#7c7c8c",  # was SURFACE_3, 1.1:1
     "ACCENT": "#2563eb",  # white text on it 5.2:1 (was #3b82f6, 3.7:1)
     "ACCENT_DARK": "#1d4ed8",
     "ACCENT_INK": "#1d4ed8",  # accent as text on the page: 5.5:1 on the sidebar
@@ -80,9 +82,21 @@ DAY = {
     "PLAYHEAD": "#0a0a12",  # dark on the light background (white was invisible)
 }
 
+# Increased contrast (the system's contrast setting: Windows contrast themes, macOS Increase
+# Contrast; or Settings > Increase contrast): secondary text, borders and tracks move a step
+# closer to the main text colour, so nothing depends on a subtle shade.
+HIGH_CONTRAST = {
+    "night": {"MUTED": "#dcdcec", "FAINT": "#b8b8d0", "BORDER": "#8a8aa6", "BORDER_STRONG": "#b8b8d0",
+              "CONTROL_BORDER": "#b8b8d0", "TRACK": "#9a9ab4"},
+    "day": {"MUTED": "#14141c", "FAINT": "#363645", "BORDER": "#6e6e8a", "BORDER_STRONG": "#363645",
+            "CONTROL_BORDER": "#363645", "TRACK": "#5f5f7a"},
+}
+CONTRAST = "auto"  # "auto" follows the system | "high" always
+HIGH = False  # increased contrast in use now
+
 # current values (night by default); replaced by apply()
 BG = BG_ALT = SURFACE = SURFACE_2 = SURFACE_3 = BORDER = BORDER_STRONG = ""
-TEXT = MUTED = FAINT = CONTROL_BORDER = ACCENT = ACCENT_DARK = ACCENT_INK = ACCENT_TEXT = ORIGINAL = ORIGINAL_TEXT = ""
+TEXT = MUTED = FAINT = CONTROL_BORDER = TRACK = ACCENT = ACCENT_DARK = ACCENT_INK = ACCENT_TEXT = ORIGINAL = ORIGINAL_TEXT = ""
 WARNING = ERROR = SUCCESS = RECORD = RECORD_TEXT = RECORD_HOVER = WAVE_ORIGINAL = WAVE_ENHANCED = PLAYHEAD = ""
 MODE = "night"
 STYLESHEET = ""
@@ -366,7 +380,7 @@ QComboBox QAbstractItemView {{ background: {SURFACE}; border: 1px solid {BORDER_
 
 QSlider:horizontal {{ min-height: 20px; }}
 QSlider:vertical {{ min-width: 18px; }}
-QSlider::groove:horizontal {{ height: 4px; background: {SURFACE_3}; border-radius: 2px; }}
+QSlider::groove:horizontal {{ height: 4px; background: {TRACK}; border-radius: 2px; }}
 QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }}
 QSlider::handle:horizontal {{ background: {TEXT}; width: 16px; height: 16px; margin: -6px 0; border-radius: 8px; }}
 QSlider::handle:horizontal:hover {{ background: {ACCENT}; }}
@@ -375,7 +389,7 @@ QSlider::handle:vertical:focus {{ background: {ACCENT}; }}
 QSlider::sub-page:horizontal:disabled {{ background: {BORDER_STRONG}; }}
 QSlider::handle:horizontal:disabled {{ background: {FAINT}; }}
 QSlider[role="small"]::handle:horizontal {{ width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; }}
-QSlider::groove:vertical {{ width: 4px; background: {SURFACE_3}; border-radius: 2px; }}
+QSlider::groove:vertical {{ width: 4px; background: {TRACK}; border-radius: 2px; }}
 QSlider::handle:vertical {{ background: {TEXT}; height: 12px; width: 12px; margin: 0 -4px; border-radius: 6px; }}
 QSlider::handle:vertical:hover {{ background: {ACCENT}; }}
 QSlider::add-page:vertical, QSlider::sub-page:vertical {{ background: transparent; }}
@@ -389,6 +403,11 @@ QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 3px; border: 1
 QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; image: url("{check}"); }}
 QCheckBox::indicator:disabled {{ border-color: {BORDER_STRONG}; }}
 QCheckBox::indicator:checked:disabled {{ background: {SURFACE_3}; border-color: {BORDER_STRONG}; image: url("{check_disabled}"); }}
+/* radio buttons: the same visible outline; the chosen one is a filled ring with a dot */
+QRadioButton {{ spacing: 8px; }}
+QRadioButton::indicator {{ width: 16px; height: 16px; border-radius: 9px; border: 1px solid {CONTROL_BORDER}; background: {SURFACE_2}; }}
+QRadioButton::indicator:checked {{ border-color: {ACCENT}; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {ACCENT_TEXT}, stop:0.38 {ACCENT_TEXT}, stop:0.45 {ACCENT}, stop:1 {ACCENT}); }}
+QRadioButton[focusring="true"]::indicator {{ border: 2px solid {TEXT}; }}
 
 QScrollArea {{ border: none; background: transparent; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
@@ -447,15 +466,33 @@ def resolve_mode(preference: str) -> str:
     return "night"
 
 
-def apply(app, preference: str = "auto", fonts: str | None = None) -> str:
-    """Switch every colour (and the fonts, when ``fonts`` is "system" or "brand") and
-    restyle the running application. Returns the mode used."""
-    global MODE, STYLESHEET
+def system_high_contrast() -> bool:
+    """The system asks for more contrast (a Windows contrast theme, macOS Increase Contrast)."""
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QGuiApplication
+
+        hints = QGuiApplication.styleHints()  # kept alive while its accessibility hints are read
+        return hints.accessibility().contrastPreference() == Qt.ContrastPreference.HighContrast
+    except Exception:
+        return False
+
+
+def apply(app, preference: str = "auto", fonts: str | None = None, contrast: str | None = None) -> str:
+    """Switch every colour (and the fonts, when ``fonts`` is "system" or "brand"; the contrast,
+    when ``contrast`` is "auto" or "high") and restyle the running application. Returns the
+    mode used."""
+    global MODE, STYLESHEET, CONTRAST, HIGH
     if fonts is not None:
         set_font_style(fonts)
+    if contrast is not None:
+        CONTRAST = "high" if contrast == "high" else "auto"
     load_fonts()
     MODE = resolve_mode(preference)
+    HIGH = CONTRAST == "high" or system_high_contrast()
     _set(DAY if MODE == "day" else NIGHT)
+    if HIGH:
+        _set(HIGH_CONTRAST[MODE])
     STYLESHEET = build_stylesheet()
     if app is not None:
         app.setPalette(palette())

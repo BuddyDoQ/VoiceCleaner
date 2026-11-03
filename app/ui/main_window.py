@@ -291,8 +291,9 @@ class MainWindow(QMainWindow):
         self.device_chip = label("Detecting hardware\u2026", "status")
         self.device_chip.setToolTip("The processor used for AI enhancement. Change it in Settings.")
         self.model_chip = label("Loading AI model\u2026", "status")
+        self._engine_dot = label("\u00b7", "status")
         lay.addWidget(self.device_chip)
-        lay.addWidget(label("\u00b7", "status"))
+        lay.addWidget(self._engine_dot)
         lay.addWidget(self.model_chip)
         lay.addSpacing(8)
         # day and night follow the system's light/dark setting (Settings can keep one)
@@ -639,23 +640,24 @@ class MainWindow(QMainWindow):
         self.match_box.setChecked(self.config.match_loudness_ab)
         self.match_box.toggled.connect(self._update_match_gain)
         right.addWidget(self.match_box)
-        right.addSpacing(8)
+        return c
 
+    def _build_noise_profile(self):
+        """Learn / Clear Noise Profile, in the sidebar under Noise Reduction (the setting it
+        affects), not among the playback controls."""
         self.learn_btn = QPushButton("Learn Noise Profile")
         self.learn_btn.setToolTip("Drag across a part of the ORIGINAL waveform that contains only background\n"
                                   "noise (no speech), then click here. VoiceCleaner will remove that noise.")
         self.learn_btn.clicked.connect(self.learn_noise_profile)
-        right.addWidget(self.learn_btn)
         # one width for both texts (Learn / Clear), so the row does not change size
-        fm = self.learn_btn.fontMetrics()
-        self.learn_btn.setMinimumWidth(max(fm.horizontalAdvance(t) for t in ("Learn Noise Profile",
-                                                                           "Clear Noise Profile")) + 36)
+        self.learn_btn.setMinimumWidth(QFontMetrics(self.learn_btn.font()).horizontalAdvance("Learn Noise Profile") + 36)
         self.profile_label = label("", "faint")
-        # a status note: it may be cut short, but never makes the editor wider than the window
+        # a status note: it may be cut short, but never makes the sidebar wider
         self.profile_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.profile_label.setMinimumWidth(0)
-        right.addWidget(self.profile_label, 1)
-        return c
+        box = self.settings_panel.noise_extra_layout
+        box.addWidget(self.learn_btn)
+        box.addWidget(self.profile_label, 1)
 
     def _set_profile_note(self, text: str):
         """The note next to Learn Noise Profile (cut short when space is tight; never moves the row)."""
@@ -669,9 +671,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "transport_box"):
             return
         avail = self.editor_scroll.viewport().width() - 44 - 28  # editor and card margins
-        # without the note next to Learn Noise Profile: it is cut short rather than moving the row
-        note = self.profile_label.sizeHint().width() if self.profile_label.isVisible() else 0
-        need = self.transport_left.sizeHint().width() + self.transport_right.sizeHint().width() - note + 30
+        need = self.transport_left.sizeHint().width() + self.transport_right.sizeHint().width() + 30
         direction = QBoxLayout.LeftToRight if need <= avail else QBoxLayout.TopToBottom
         if self.transport_box.direction() != direction:
             self.transport_box.setDirection(direction)
@@ -723,6 +723,7 @@ class MainWindow(QMainWindow):
         self.settings_panel.smartNoteHidden.connect(lambda: self.config.extra.update(smart_note_hidden=True))
         self.settings_panel.restore_section_states(self.config.extra.get("sections", {}))
         self.settings_panel.downloadResynthRequested.connect(self._download_resynth_model)
+        self._build_noise_profile()
         il.addWidget(self.settings_panel)
         scroll.setWidget(inner)
         v.addWidget(scroll, 1)
@@ -993,6 +994,7 @@ class MainWindow(QMainWindow):
             self._mm_ready.set()
             self.model_chip.setText("AI model unavailable")
             self.device_chip.setText("CPU")
+            self._show_engine_readout(True)
             self.settings_panel.set_ai_available(False)
             log.warning("Engine init failed: %s", message)
             self.engineReady.emit()
@@ -1010,6 +1012,7 @@ class MainWindow(QMainWindow):
         if mm is None:
             return
         st = mm.status()
+        notable = False  # something the user should know or can act on
         dev_name = st.device.name.removeprefix("NVIDIA ").removeprefix("GeForce ")
         self.device_chip.setText(f"{'GPU' if st.device.kind == 'cuda' else 'CPU'} · {dev_name}")
         self.device_chip.setToolTip(f"Processing device: {st.device.label}\nChange it in Settings (⋯ menu).")
@@ -1024,6 +1027,7 @@ class MainWindow(QMainWindow):
             gpu = nvidia_gpu_name()
             if gpu:
                 self.device_chip.setText(f"CPU · {gpu.removeprefix('NVIDIA ')} found")
+                notable = True  # a much faster edition is available for this PC
                 self.device_chip.setToolTip(
                     f"This is the standard (CPU) edition. Your {gpu} can process much faster with the "
                     "NVIDIA GPU edition of VoiceCleaner (free download on GitHub).")
@@ -1039,6 +1043,21 @@ class MainWindow(QMainWindow):
             self.model_chip.setToolTip(st.error or f"Model files not found in {models_dir()}.\n"
                                                    "Traditional noise reduction will be used.")
             self.settings_panel.set_ai_available(False)
+            notable = True
+        if self.config.device_preference == "cuda" and st.device.kind != "cuda":
+            notable = True  # asked for the GPU, running on the CPU
+        self._show_engine_readout(notable)
+
+    def _show_engine_readout(self, show: bool):
+        """The processor and AI model in the header only while loading or when something needs
+        attention (no AI model, GPU asked for but not used, a faster edition for this PC). When
+        all is well it is diagnostic detail, so it lives in Settings and Models and Licenses."""
+        for w in (self.device_chip, self._engine_dot, self.model_chip):
+            w.setVisible(show)
+
+    def engine_summary(self) -> str:
+        """What processes the audio, in words, for Settings."""
+        return f"{self.device_chip.text()}  ·  {self.model_chip.text()}"
 
     def _get_model_manager(self):
         self._mm_ready.wait()
@@ -1051,6 +1070,8 @@ class MainWindow(QMainWindow):
             if pref == "cuda" and self.model_manager.device.kind != "cuda":
                 self._error("GPU not available", "No compatible NVIDIA GPU was found. Processing will use the CPU.")
             self._update_engine_chips()
+        if getattr(self, "_settings_dialog", None) is not None:
+            self._settings_dialog.refresh()
 
     # ============================================================================ files
     def choose_file(self):
@@ -2418,6 +2439,17 @@ class MainWindow(QMainWindow):
             w.updateGeometry()
         log.info("Fonts: %s", style)
 
+    def set_contrast(self, pref: str):
+        """"high": always increased contrast; "auto": as the system asks."""
+        self.config.extra["contrast"] = pref
+        theme.apply(QApplication.instance(), self.theme_pref, contrast=pref)
+        if getattr(self, "prompter", None) is not None:
+            self.prompter.apply_theme()
+        log.info("Contrast: %s (high: %s)", pref, theme.HIGH)
+
+    def _system_contrast_changed(self, *_):
+        self.set_contrast(self.config.extra.get("contrast", "auto"))
+
     def _system_scheme_changed(self, *_):
         if self.theme_pref == "auto":
             self.set_theme("auto")
@@ -2715,7 +2747,9 @@ class MainWindow(QMainWindow):
         self._tour = tour.TourOverlay(self, steps, heading)
         self._tour.finished.connect(self._tour_done)
         # the window's single-key shortcuts (Space, R, A/B, Esc...) would act behind the tour
+        # (on a Mac those keys belong to menu-bar commands: pause them too)
         self._tour_paused = [sc for sc in self.findChildren(QShortcut) if sc.isEnabled()]
+        self._tour_paused += [a for a in getattr(self, "_menu_commands", []) if a.isEnabled()]
         for sc in self._tour_paused:
             sc.setEnabled(False)
         self._tour.start()

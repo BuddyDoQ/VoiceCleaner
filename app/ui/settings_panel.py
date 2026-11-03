@@ -249,6 +249,14 @@ class SettingsPanel(QWidget):
             s.valueChanged.connect(self._simple_changed)
             s.resetRequested.connect(lambda k=key, w=s: w.set_value(getattr(self._reference(), k), emit=True))
             lay.addWidget(s)
+            if s is self.noise:
+                # the main window puts Learn / Clear Noise Profile here, under the control it
+                # affects (it sat among the playback controls); hidden in the Batch tab
+                self.noise_extra = QWidget()
+                self.noise_extra_layout = QHBoxLayout(self.noise_extra)
+                self.noise_extra_layout.setContentsMargins(0, 0, 0, 6)
+                self.noise_extra_layout.setSpacing(8)
+                lay.addWidget(self.noise_extra)
 
         lay.addWidget(_divider())
         self._build_resynthesis(lay)
@@ -766,8 +774,10 @@ class SettingsPanel(QWidget):
         self._sync_smart_ui()
 
     def set_context(self, context: str):
-        """"enhance" or "batch": only the wording of the Smart note differs."""
+        """"enhance" or "batch": the wording of the Smart note differs, and the noise profile
+        (learned from one recording) is not offered for a batch."""
         self._context = context
+        self.noise_extra.setVisible(context != "batch")
         self._sync_smart_ui()
 
     def _update_preset_desc(self):

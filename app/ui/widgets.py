@@ -82,10 +82,81 @@ class TimeLabel(QLabel):
                           fm.height() + m.top() + m.bottom() + 2)
 
 
+def icon_button(text: str, name: str, role: str = "icon", tooltip: str | None = None) -> QPushButton:
+    """A button showing a symbol, with a name screen readers say instead of the symbol
+    ("Stop", not "black square")."""
+    b = QPushButton(text)
+    b.setProperty("role", role)
+    b.setAccessibleName(name)
+    if tooltip:
+        b.setToolTip(tooltip)
+    return b
+
+
+def show_play_state(button, playing: bool) -> None:
+    """The round Play button: ▶ while stopped, ❚❚ while playing, named for screen readers."""
+    button.setText("❚❚" if playing else "▶")
+    button.setAccessibleName("Pause" if playing else "Play")
+
+
 def card() -> QFrame:
     f = QFrame()
     f.setProperty("role", "card")
     return f
+
+
+class TwoLineLabel(QLabel):
+    """A status line that wraps onto a second line instead of cutting the text short.
+
+    It always keeps the height of two lines, so the controls below it never move as the
+    message changes; the rare message longer than that ends in an ellipsis, with the full
+    text in the tooltip."""
+
+    LINES = 2
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.setMinimumWidth(40)
+        self.setToolTip(text)
+        self._fit()
+
+    def setText(self, text: str):
+        super().setText(text)
+        self.setToolTip(text)
+
+    def _fit(self):
+        h = self.fontMetrics().lineSpacing() * self.LINES + 2
+        if self.height() != h:
+            self.setFixedHeight(h)
+
+    def event(self, e):
+        if e.type() in (QEvent.FontChange, QEvent.StyleChange, QEvent.Polish):
+            self._fit()
+        return super().event(e)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setFont(self.font())
+        p.setPen(self.palette().color(self.foregroundRole()))
+        fm = self.fontMetrics()
+        words, lines = " ".join(self.text().split()).split(" "), []
+        line = ""
+        for i, w in enumerate(words):
+            trial = f"{line} {w}".strip()
+            if line and fm.horizontalAdvance(trial) > self.width():
+                lines.append(line)
+                line = w
+                if len(lines) == self.LINES - 1:  # the last line takes the rest, elided
+                    line = " ".join(words[i:])
+                    break
+            else:
+                line = trial
+        lines.append(fm.elidedText(line, Qt.ElideRight, self.width()))
+        for n, text in enumerate(lines[:self.LINES]):
+            p.drawText(0, n * fm.lineSpacing() + fm.ascent() + 1, text)
+        p.end()
 
 
 class _FitWrappedHeight(QObject):
@@ -363,51 +434,3 @@ class MetricsPanel(QFrame):
 
     def set_notes(self, notes: list[str]):
         self.notes.setText("\n".join(f"• {n}" for n in notes))
-
-
-class ThemeToggle(QPushButton):
-    """Round day/night switch, drawn with smooth (antialiased) shapes: a crescent moon in
-    night mode, a sun in day mode."""
-
-    SIZE = 34
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(self.SIZE, self.SIZE)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFlat(True)
-        self.setAttribute(Qt.WA_Hover)
-
-    def paintEvent(self, _e):
-        import math
-
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        hover = self.underMouse()
-        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
-        p.setPen(QPen(theme.qcolor(theme.ACCENT if hover else theme.BORDER_STRONG), 1.2))
-        p.setBrush(theme.qcolor(theme.SURFACE_2) if hover else Qt.NoBrush)
-        p.drawEllipse(r)
-        c = r.center()
-        ink = theme.qcolor(theme.ACCENT if hover else theme.TEXT)
-        p.setPen(Qt.NoPen)
-        p.setBrush(ink)
-        if theme.MODE == "night":  # crescent: a disc with an offset disc cut out
-            rad = r.width() * 0.22
-            moon = QPainterPath()
-            moon.addEllipse(c, rad, rad)
-            cut = QPainterPath()
-            cut.addEllipse(QPointF(c.x() + rad * 0.55, c.y() - rad * 0.45), rad * 0.85, rad * 0.85)
-            p.drawPath(moon.subtracted(cut))
-        else:  # sun: a disc and eight rays
-            rad = r.width() * 0.12
-            p.drawEllipse(c, rad, rad)
-            pen = QPen(ink, 1.6)
-            pen.setCapStyle(Qt.RoundCap)
-            p.setPen(pen)
-            for i in range(8):
-                a = i * math.pi / 4
-                p1 = QPointF(c.x() + math.cos(a) * rad * 1.75, c.y() + math.sin(a) * rad * 1.75)
-                p2 = QPointF(c.x() + math.cos(a) * rad * 2.6, c.y() + math.sin(a) * rad * 2.6)
-                p.drawLine(p1, p2)
-        p.end()

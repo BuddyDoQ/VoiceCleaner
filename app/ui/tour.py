@@ -94,7 +94,7 @@ WHATS_NEW = [
          tab=0, version="1.1.3"),
     Step("Easier-to-read text",
          "VoiceCleaner now uses your system's fonts. Prefer the Steamburger Studios look? "
-         "⋯ menu → Appearance → Brand Fonts.",
+         "⋯ menu → Settings → Brand fonts.",
          target=lambda w: w.menu_btn, version="1.1.3"),
     Step("Phone memos, MP3s and videos",
          "Open M4A voice memos, MP3, FLAC, Opus and WMA files, and the sound of videos such as "
@@ -148,6 +148,10 @@ WHATS_NEW = [
          f"Every tab, setting and shortcut explained: User Manual in {MANUAL_WHERE}, or press {HELP_KEYS}. "
          "It opens in your browser and works offline.",
          target=lambda w: w.menu_btn, version="1.1.11"),
+    Step("Easier to read and to use",
+         "Clearer text and buttons by day and night, a tick in ticked boxes, and a ring that "
+         "follows the Tab key. Day and night follow your system; Settings can keep one.",
+         tab=0, version="1.1.12"),
 ]
 
 
@@ -233,7 +237,7 @@ class TourOverlay(QWidget):
     def _style(self):
         self.card.setStyleSheet(
             f"QFrame#tour_card {{ background: {theme.SURFACE}; border: 1px solid {theme.ACCENT}; border-radius: 12px; }}"
-            f"QLabel#tour_count {{ color: {theme.ACCENT}; font-family: '{theme.FONT_MONO}'; "
+            f"QLabel#tour_count {{ color: {theme.ACCENT_INK}; font-family: '{theme.FONT_MONO}'; "
             f"font-size: {theme.pt(8.5)}pt; background: transparent; }}"
             f"QLabel#tour_title {{ color: {theme.TEXT}; font-family: '{theme.FONT_UI}'; font-weight: 700; "
             f"font-size: {theme.pt(12.5)}pt; background: transparent; }}"

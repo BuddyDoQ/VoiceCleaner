@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.1.12
+
+- **Easier to read and to use without a mouse.** The text on blue, purple and red buttons
+  stands out more (dark text on the brighter blue at night), small grey labels and the
+  blue *AUTO* tags are clearer, and the outlines of check boxes are easy to see. A ticked
+  box now shows a tick. Moving through the window with `Tab` shows a ring on the control
+  you are on, and screen readers name the symbol buttons (Play, Pause, Stop, Move up…).
+- **Settings window** (`Ctrl+,`, or *Settings…* in the ⋯ menu): appearance, fonts,
+  processing device and update checks in one place. Changes apply at once.
+- **Day and night follow the system.** The sun/moon button in the header is gone; Settings
+  can still keep VoiceCleaner in Day or Night.
+- **Buttons read alike:** every button label is in the interface font with normal
+  capitalization (*Enhance*, *Original / Enhanced*, *Loop*, *Preview*).
+- **Nothing cut short:** the status lines under the settings wrap onto a second line, and
+  the Batch list shows the saved file in its own *Saved As* column.
+- **Fewer pop-ups:** hints for *Learn Noise Profile* appear at the button, and a finished
+  update is reported in the status line instead of an alert.
+- **Mac menu bar:** File, Edit, Playback, View, Window and Help menus with every command
+  and its keys; About, Settings… and Check for Updates… are in the VoiceCleaner menu.
+
 ## 1.1.11
 
 - **User manual.** Every tab, setting and shortcut explained, with pictures. *User Manual*

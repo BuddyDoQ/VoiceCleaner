@@ -88,6 +88,60 @@ def test_playhead_stands_out_in_both_themes():
             assert _contrast(palette["PLAYHEAD"], bg) >= 4.5, (palette["PLAYHEAD"], bg)
 
 
+def test_text_meets_contrast_minimums_in_both_themes():
+    """Small text needs 4.5:1 (WCAG AA): button labels on their fills, accent and faint text on
+    every panel; check box outlines need 3:1 to be seen at all."""
+    from app.ui import theme
+
+    for palette in (theme.DAY, theme.NIGHT):
+        panels = [palette[k] for k in ("BG", "BG_ALT", "SURFACE", "SURFACE_2")]
+        for text, fill in (("ACCENT_TEXT", "ACCENT"), ("ACCENT_TEXT", "ACCENT_DARK"),
+                           ("ORIGINAL_TEXT", "ORIGINAL"), ("RECORD_TEXT", "RECORD"),
+                           ("RECORD_TEXT", "RECORD_HOVER")):
+            assert _contrast(palette[text], palette[fill]) >= 4.5, (text, fill, palette[fill])
+        for token in ("ACCENT_INK", "FAINT", "MUTED", "TEXT"):
+            for bg in panels:
+                assert _contrast(palette[token], bg) >= 4.5, (token, palette[token], bg)
+        for bg in panels:
+            assert _contrast(palette["CONTROL_BORDER"], bg) >= 3.0, (palette["CONTROL_BORDER"], bg)
+
+
+def test_ticked_check_box_shows_a_tick_and_focus_ring_follows_keyboard():
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from pathlib import Path
+
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QFocusEvent
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication, QPushButton
+
+    from app.ui import focus_ring, theme
+    from app.ui.widgets import icon_button, show_play_state
+
+    app = QApplication.instance() or QApplication([])
+    for mode in ("day", "night"):
+        theme.apply(app, mode)
+        line = next(x for x in theme.STYLESHEET.splitlines() if "QCheckBox::indicator:checked {" in x)
+        tick = line.split('url("')[1].split('")')[0]
+        assert Path(tick).is_file(), tick
+
+    ring = focus_ring.FocusRing()
+    b = QPushButton("x")
+    ring.eventFilter(b, QFocusEvent(QEvent.FocusIn, Qt.TabFocusReason))
+    assert b.property("focusring") is True
+    ring.eventFilter(b, QFocusEvent(QEvent.FocusOut, Qt.TabFocusReason))
+    assert b.property("focusring") is False
+    ring.eventFilter(b, QFocusEvent(QEvent.FocusIn, Qt.MouseFocusReason))
+    assert b.property("focusring") is False  # a click shows no ring
+
+    play = icon_button("▶", "Play", "round")
+    assert play.accessibleName() == "Play"
+    show_play_state(play, True)
+    assert play.accessibleName() == "Pause" and play.text() == "❚❚"
+
+
 @pytest.mark.parametrize("fonts", ["system", "brand"])
 def test_tab_labels_are_never_cut_short(fonts):
     """The tab bar measures its tabs with its own font; it must be the font the tabs are drawn

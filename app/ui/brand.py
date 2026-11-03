@@ -90,7 +90,7 @@ class AboutDialog(QDialog):
         v.addWidget(body)
         v.addSpacing(8)
         link = QLabel(f'Made by <b>{STUDIO_NAME}</b> — <a href="{STUDIO_URL}" '
-                      f'style="color:{theme.ACCENT}; text-decoration:none;">www.steamburgerstudios.com</a>')
+                      f'style="color:{theme.ACCENT_INK}; text-decoration:none;">www.steamburgerstudios.com</a>')
         link.setOpenExternalLinks(True)
         link.setTextInteractionFlags(Qt.TextBrowserInteraction)
         v.addWidget(link)

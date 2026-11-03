@@ -119,7 +119,7 @@ def main():
     w.resize(1360, 880)
     w.show()
     pump(app, lambda: w._mm_ready.is_set(), 120)
-    check("top bar button: closed", w.prompter_btn.property("state") == "" and "TELEPROMPTER" in w.prompter_btn.text())
+    check("top bar button: closed", w.prompter_btn.property("state") == "" and "Teleprompter" in w.prompter_btn.text())
     w.prompter_btn.click()
     p = w.prompter
     check("top bar button opens it", p is not None and w.prompter_btn.property("state") == "open")
@@ -137,7 +137,7 @@ def main():
     pump(app, lambda: p.playing, 20)
     t0 = time.perf_counter() - p.recorder.frames / SR  # wall time of the stream's start
     check("recording with REC shown", p.recording and "REC" in p.rec_label.text())
-    check("top bar shows REC", w.prompter_btn.property("state") == "rec" and "REC" in w.prompter_btn.text())
+    check("top bar shows REC", w.prompter_btn.property("state") == "rec" and "Recording" in w.prompter_btn.text())
     w.grab().save(str(out / "0_top_bar_rec.png"))
 
     def at(i, extra=0.5):  # wait until the stream is past mark i

@@ -158,8 +158,10 @@ class SettingsPanel(QWidget):
         head.addWidget(sec)
         head.addStretch(1)
         self.undo_btn, self.redo_btn = QToolButton(), QToolButton()
-        for b, text, fn in ((self.undo_btn, "\u21b6", self.undo), (self.redo_btn, "\u21b7", self.redo)):
+        for b, text, name, fn in ((self.undo_btn, "\u21b6", "Undo", self.undo),
+                                  (self.redo_btn, "\u21b7", "Redo", self.redo)):
             b.setText(text)
+            b.setAccessibleName(name)
             b.setProperty("role", "link")
             b.setStyleSheet(f"font-size: {theme.pt(13)}pt; padding: 0 3px;")
             b.setCursor(Qt.PointingHandCursor)
@@ -193,6 +195,7 @@ class SettingsPanel(QWidget):
         row.addWidget(self.save_preset_btn)
         self.preset_menu_btn = QToolButton()
         self.preset_menu_btn.setText("\u22ef")
+        self.preset_menu_btn.setAccessibleName("Manage presets")
         self.preset_menu_btn.setProperty("role", "menu")
         self.preset_menu_btn.setToolTip("Manage presets")
         self.preset_menu_btn.setPopupMode(QToolButton.InstantPopup)
@@ -224,6 +227,7 @@ class SettingsPanel(QWidget):
         nl.addWidget(self.smart_note_text, 1)
         close = QToolButton()
         close.setText("\u00d7")
+        close.setAccessibleName("Hide this note")
         close.setProperty("role", "link")
         close.setStyleSheet(f"font-size: {theme.pt(13)}pt; padding: 0 4px;")
         close.setCursor(Qt.PointingHandCursor)
@@ -749,7 +753,7 @@ class SettingsPanel(QWidget):
                 when = "this recording" if self.analysis is not None else "each recording when it is loaded"
             self.smart_note_text.setText(
                 f"<b>Smart is on.</b> Noise, Speech and Room (and the controls tied to them, marked "
-                f"<span style='color:{theme.ACCENT}'>AUTO</span>) are set for {when}. "
+                f"<span style='color:{theme.ACCENT_INK}'>AUTO</span>) are set for {when}. "
                 "Turn Smart off to adjust them yourself.")
 
     def hide_smart_note(self):

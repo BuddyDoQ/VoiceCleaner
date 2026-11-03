@@ -232,6 +232,7 @@ class RecordPanel(QFrame):
         head.addWidget(self.refresh_btn)
         close = QToolButton()
         close.setText("✕")
+        close.setAccessibleName("Hide recording controls")
         close.setToolTip("Hide the recording controls")
         close.setProperty("role", "link")
         close.clicked.connect(self.closeRequested)

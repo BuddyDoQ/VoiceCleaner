@@ -32,7 +32,7 @@ from ..workers.processing_worker import run_task
 from . import theme
 from .audio_player import AudioPlayer
 from .waveform import WaveformOverview, WaveformView
-from .widgets import TimeLabel, card, label
+from .widgets import TimeLabel, card, icon_button, label, show_play_state
 
 log = get_logger("compile")
 PATH_ROLE = Qt.UserRole
@@ -95,7 +95,7 @@ class TakeDelegate(QStyledItemDelegate):
         if take is None:
             detail, tone = "Loading…", theme.FAINT
         elif path in self.panel._busy_rows():
-            detail, tone = "\u21bb Re-enhancing\u2026", theme.ACCENT
+            detail, tone = "\u21bb Re-enhancing\u2026", theme.ACCENT_INK
         elif take.silent:
             detail, tone = "No audible sound: will be skipped", theme.WARNING
         else:
@@ -251,7 +251,7 @@ class CompilePanel(QWidget):
         self._rebuild_timer.timeout.connect(lambda: self.build())
         self.player = AudioPlayer(self, routing=routing)
         self.player.positionChanged.connect(self._on_position)
-        self.player.stateChanged.connect(lambda s: self.play_btn.setText("❚❚" if s == "playing" else "▶"))
+        self.player.stateChanged.connect(lambda s: show_play_state(self.play_btn, s == "playing"))
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 18, 24, 18)
@@ -272,20 +272,16 @@ class CompilePanel(QWidget):
         add_files.clicked.connect(self._choose_files)
         self.remove_btn = QPushButton("Remove")
         self.remove_btn.clicked.connect(self.remove_selected)
-        up = QPushButton("▲")
-        up.setProperty("role", "icon")
-        up.setToolTip(f"Move up ({shortcut_text('Ctrl+Up')})")
+        up = icon_button("▲", "Move up", tooltip=f"Move up ({shortcut_text('Ctrl+Up')})")
         up.clicked.connect(lambda: self.move_selected(-1))
-        down = QPushButton("▼")
-        down.setProperty("role", "icon")
-        down.setToolTip(f"Move down ({shortcut_text('Ctrl+Down')})")
+        down = icon_button("▼", "Move down", tooltip=f"Move down ({shortcut_text('Ctrl+Down')})")
         down.clicked.connect(lambda: self.move_selected(1))
         clear = QPushButton("Clear")
         clear.setProperty("role", "ghost")
         clear.clicked.connect(self.clear)
         # where the list comes from: the session's exports, or the teleprompter's takes in script order
-        self.src_exports = QPushButton("SESSION EXPORTS")
-        self.src_script = QPushButton("TELEPROMPTER TAKES")
+        self.src_exports = QPushButton("Session Exports")
+        self.src_script = QPushButton("Teleprompter Takes")
         for b, side in ((self.src_exports, "left"), (self.src_script, "right")):
             b.setProperty("role", "ab")
             b.setProperty("side", side)
@@ -426,13 +422,10 @@ class CompilePanel(QWidget):
         self.wave.seekRequested.connect(self.player.seek)
         v.addWidget(self.wave)
         row = QHBoxLayout()
-        self.play_btn = QPushButton("▶")
-        self.play_btn.setProperty("role", "round")
-        self.play_btn.setToolTip("Build (if needed) and play the compilation (Space)")
+        self.play_btn = icon_button("▶", "Play", "round", "Build (if needed) and play the compilation (Space)")
         self.play_btn.clicked.connect(self.toggle_play)
         row.addWidget(self.play_btn)
-        stop = QPushButton("■")
-        stop.setProperty("role", "icon")
+        stop = icon_button("■", "Stop", tooltip="Stop")
         stop.clicked.connect(self.player.stop)
         row.addWidget(stop)
         self.time_label = TimeLabel()

@@ -173,7 +173,7 @@ The details:
     moments they stick out, so the voice stays bright without sounding sharp.
 * **Scrolling:** the mouse wheel scrolls the settings, even over a slider or the preset box.
   Click a control first to adjust it with the wheel.
-* **Fonts:** system fonts by default; *Appearance → Brand Fonts* in the ⋯ menu switches to
+* **Fonts:** system fonts by default; *Brand fonts* in *Settings* (`Ctrl+,`) switches to
   the Steamburger Studios fonts.
 * **Advanced:** noise floor bias, spectral subtraction strength, noise gate, residual
   noise floor, presence, clarity, low-end cleanup, reverb/echo, target loudness and
@@ -299,9 +299,9 @@ The details:
   * **Enhance tab** (Dynamics → Pauses): applied when exporting, including Batch. The
     preview keeps the original timing, so the A/B comparison stays aligned. The notes
     say how many pauses will be shortened and the time saved. Presets never enable it.
-* **Day and night themes:** use the sun/moon button in the header. *Appearance* in the
-  menu also offers *Automatic*, which follows the system's light/dark setting. Colours
-  follow the Steamburger Studios website; *Appearance → Brand Fonts* also uses its type
+* **Day and night themes:** VoiceCleaner follows the system's light/dark setting.
+  *Settings* (`Ctrl+,`, in the ⋯ menu) can keep it in *Day* or *Night* instead. Colours
+  follow the Steamburger Studios website; *Brand fonts* in Settings also uses its type
   (Bebas Neue, Syne, DM Mono) instead of the system fonts.
 * **Batch:** drop several files (or a folder): recordings in any supported format, or videos.
   Turn on **Preview** (`P`) and click a file to hear a 10-second sample of it (the part with

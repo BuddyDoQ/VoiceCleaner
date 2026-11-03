@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QByteArray, QEvent, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QByteArray, QEvent, QPoint, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QFont, QFontMetrics, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QButtonGroup, QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
                                QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
@@ -46,8 +46,8 @@ from .brand import STUDIO_NAME, AboutDialog, OpenSessionDialog, SessionNameDialo
 from .compile_panel import CompilePanel
 from .playback_panel import PlaybackPanel
 from .update_dialog import UpdateChecker, UpdateDialog
-from .widgets import (DropZone, ElidedLabel, MetricsPanel, ThemeToggle, TimeLabel, card, label,
-                      reserve_bold_width)
+from .widgets import (DropZone, ElidedLabel, MetricsPanel, TimeLabel, card, icon_button, label,
+                      reserve_bold_width, show_play_state, TwoLineLabel)
 
 log = get_logger("ui")
 
@@ -74,6 +74,7 @@ SHORTCUTS = [
     ("Ctrl+T", "Teleprompter (its own keys: press H in it)"),
     ("Ctrl+Z / " + REDO_KEYS, "Undo / redo a settings change"),
     ("Esc", "Cancel"),
+    ("Ctrl+,", "Settings: appearance, fonts, processing device, updates"),
     (HELP_KEYS, "User manual" + (" (also in the Help menu: ⌘?)" if sys.platform == "darwin" else "")),
     ("Ctrl+/", "This list"),
     ("Ctrl+mouse wheel", "Zoom the waveform"),
@@ -117,9 +118,10 @@ class MainWindow(QMainWindow):
         self._edits_key: tuple | None = None  # (session folder, key) the edits are saved under
         self._exported_edits: list = []  # the edits the last export was made with
         self._tour = None  # the Getting Started / What's New overlay, while shown
-        from . import wheel_guard
+        from . import focus_ring, wheel_guard
 
         wheel_guard.install()  # the wheel scrolls panels; it adjusts only a control that was clicked
+        focus_ring.install()  # a ring shows the control reached with Tab
         self._preview_task = None
         self._preview_gen = 0
         self._export_after_enhance = None  # what to finish once "Enhance Again" is done (export / update)
@@ -270,7 +272,7 @@ class MainWindow(QMainWindow):
         bold = QFont(self.prompter_btn.font())
         bold.setBold(True)  # the recording state is bold
         widest = max(QFontMetrics(bold).horizontalAdvance(t)
-                     for t in ("\u25a4  TELEPROMPTER", "\u25cf  REC \u00b7 TELEPROMPTER"))
+                     for t in ("\u25a4  Teleprompter", "\u25cf  Recording \u00b7 Teleprompter"))
         self.prompter_btn.setFixedWidth(widest + 30)
         lay.addWidget(self.prompter_btn)
         self._update_prompter_button()
@@ -287,18 +289,17 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.activity_chip)
         # status, not buttons: plain text
         self.device_chip = label("Detecting hardware\u2026", "status")
-        self.device_chip.setToolTip("The processor used for AI enhancement. Change it in the menu.")
+        self.device_chip.setToolTip("The processor used for AI enhancement. Change it in Settings.")
         self.model_chip = label("Loading AI model\u2026", "status")
         lay.addWidget(self.device_chip)
         lay.addWidget(label("\u00b7", "status"))
         lay.addWidget(self.model_chip)
         lay.addSpacing(8)
-        self.theme_btn = ThemeToggle()
-        self.theme_btn.clicked.connect(self._toggle_theme)
-        lay.addWidget(self.theme_btn)
-        self._update_theme_button()
+        # day and night follow the system's light/dark setting (Settings can keep one)
         menu_btn = QToolButton()
         menu_btn.setText("\u22ef")
+        menu_btn.setAccessibleName("More")
+        menu_btn.setToolTip("More: files, audio output, settings, help")
         menu_btn.setProperty("role", "menu")
         menu_btn.setPopupMode(QToolButton.InstantPopup)
         menu_btn.setMenu(self._build_menu())
@@ -323,51 +324,17 @@ class MainWindow(QMainWindow):
         self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
         self.export_action = m.addAction("Export Enhanced Audio…", lambda: self.export(), QKeySequence("Ctrl+E"))
         m.addSeparator()
-        self.output_menu = m.addMenu("Audio output")
+        self.output_menu = m.addMenu("Audio Output")
         self.output_menu.aboutToShow.connect(self._fill_output_menu)
-        dev = m.addMenu("Processing device")
-        group = QActionGroup(self)
-        self.device_actions = {}
-        if sys.platform == "darwin":  # no NVIDIA GPUs on a Mac; the Apple GPU runs re-synthesis
-            choices = (("auto", "Automatic (Apple GPU for re-synthesis)"), ("cpu", "CPU only"))
-        else:
-            choices = (("auto", "Automatic (GPU if available)"), ("cpu", "CPU only"), ("cuda", "NVIDIA GPU"))
-        for key, text in choices:
-            a = QAction(text, self, checkable=True)
-            a.setChecked(self.config.device_preference == key)
-            a.triggered.connect(lambda _=False, k=key: self._set_device(k))
-            group.addAction(a)
-            dev.addAction(a)
-            self.device_actions[key] = a
-        appearance = m.addMenu("Appearance")
-        agroup = QActionGroup(self)
-        self.theme_actions = {}
-        for key, text in (("auto", "Automatic (follow system)"), ("day", "Day"), ("night", "Night")):
-            a = QAction(text, self, checkable=True)
-            a.setChecked(self.theme_pref == key)
-            a.triggered.connect(lambda _=False, k=key: self.set_theme(k))
-            agroup.addAction(a)
-            appearance.addAction(a)
-            self.theme_actions[key] = a
-        appearance.addSeparator()
-        fgroup = QActionGroup(self)
-        self.font_actions = {}
-        for key, text in (("system", "System Fonts (most readable)"), ("brand", "Brand Fonts (Steamburger Studios)")):
-            a = QAction(text, self, checkable=True)
-            a.setChecked(self.config.extra.get("fonts", "system") == key)
-            a.triggered.connect(lambda _=False, k=key: self.set_fonts(k))
-            fgroup.addAction(a)
-            appearance.addAction(a)
-            self.font_actions[key] = a
+        # appearance, fonts, processing device and update checks live in the Settings window
+        self.settings_action = m.addAction("Settings\u2026", self.open_settings, QKeySequence("Ctrl+,"))
+        self.settings_action.setMenuRole(QAction.PreferencesRole)  # macOS: in the app menu
         m.addSeparator()
         m.addAction("Teleprompter\u2026", self.open_teleprompter, QKeySequence("Ctrl+T"))
         m.addSeparator()
-        manual = m.addAction("User Manual", self._open_manual, QKeySequence(HELP_KEYS))
-        if sys.platform == "darwin":
-            # macOS keeps Cmd+? for the menu bar's Help menu (it never reaches the window), so the
-            # manual is also there, as in other Mac apps: Cmd+? then shows it
-            help_menu = self.menuBar().addMenu("Help")
-            help_menu.addAction(manual)
+        # on a Mac this same action is also in the menu bar's Help menu (mac_menu.py), where
+        # Cmd+? shows it: macOS keeps that key for the Help menu
+        m.addAction("User Manual", self._open_manual, QKeySequence(HELP_KEYS))
         m.addAction("Getting Started", lambda: self.start_tour("basics"))
         m.addAction("What's New", lambda: self.start_tour("news"))
         m.addAction("Keyboard Shortcuts", self._show_shortcuts, QKeySequence("Ctrl+/"))
@@ -375,7 +342,9 @@ class MainWindow(QMainWindow):
         m.addAction("Open Log Folder", lambda: self._open_folder(log_dir()))
         m.addAction("Models and Licenses", self._show_models)
         self.update_action = m.addAction("Check for Updates\u2026", lambda: self.check_for_updates(manual=True))
-        m.addAction(f"About {APP_NAME}", self._show_about)
+        self.update_action.setMenuRole(QAction.ApplicationSpecificRole)  # macOS: in the app menu
+        about = m.addAction(f"About {APP_NAME}", self._show_about)
+        about.setMenuRole(QAction.AboutRole)
         return m
 
     def _fill_output_menu(self):
@@ -623,8 +592,8 @@ class MainWindow(QMainWindow):
         self.transport_box.addWidget(self.transport_left, 0, Qt.AlignLeft)
         self.transport_box.addStretch(1)
         self.transport_box.addWidget(self.transport_right, 0, Qt.AlignLeft)
-        self.ab_orig = QPushButton("ORIGINAL")
-        self.ab_enh = QPushButton("ENHANCED")
+        self.ab_orig = QPushButton("Original")
+        self.ab_enh = QPushButton("Enhanced")
         for b, side in ((self.ab_orig, "left"), (self.ab_enh, "right")):
             b.setProperty("role", "ab")
             b.setProperty("side", side)
@@ -646,20 +615,16 @@ class MainWindow(QMainWindow):
         lay.addLayout(ab)
         lay.addSpacing(8)
 
-        self.play_btn = QPushButton("▶")
-        self.play_btn.setProperty("role", "round")
-        self.play_btn.setToolTip("Play / Pause (Space)")
+        self.play_btn = icon_button("▶", "Play", "round", "Play / Pause (Space)")
         self.play_btn.clicked.connect(self._toggle_main_play)
         self.play_btn.setCursor(Qt.PointingHandCursor)
         lay.addWidget(self.play_btn)
-        self.stop_btn = QPushButton("■")
-        self.stop_btn.setProperty("role", "icon")
-        self.stop_btn.setToolTip("Stop")
+        self.stop_btn = icon_button("■", "Stop", tooltip="Stop")
         self.stop_btn.clicked.connect(self.player.stop)
         lay.addWidget(self.stop_btn)
         self.time_label = TimeLabel()
         lay.addWidget(self.time_label)
-        self.loop_btn = QPushButton("\u27f2 LOOP")
+        self.loop_btn = QPushButton("\u27f2 Loop")
         self.loop_btn.setProperty("role", "toggle")
         self.loop_btn.setCheckable(True)
         self.loop_btn.setCursor(Qt.PointingHandCursor)
@@ -768,15 +733,16 @@ class MainWindow(QMainWindow):
         a = QVBoxLayout(actions)
         a.setContentsMargins(20, 14, 20, 18)
         a.setSpacing(8)
-        # one line each (full text in the tooltip): wrapped text here used to take its
-        # height from the buttons below and clip their labels
-        self.status_label = ElidedLabel("", mode=Qt.ElideRight, tooltip=True)
+        # two lines each, a fixed height (full text in the tooltip): text that wrapped freely
+        # here used to take its height from the buttons below and clip their labels, and one
+        # line cut most messages short ("switch A/B to compa…")
+        self.status_label = TwoLineLabel("")
         self.status_label.setProperty("role", "muted")
         self.progress = QProgressBar()
         self.progress.setRange(0, 1000)
         self.progress.setTextVisible(False)
         self.progress.setFixedHeight(8)
-        self.speed_label = ElidedLabel("", mode=Qt.ElideRight, tooltip=True)
+        self.speed_label = TwoLineLabel("")
         self.speed_label.setProperty("role", "faint")
         a.addWidget(self.status_label)
         a.addWidget(self.progress)
@@ -828,23 +794,39 @@ class MainWindow(QMainWindow):
             s = QShortcut(QKeySequence(key), self)
             s.activated.connect(fn)
 
-        sc(Qt.Key_Space, self._toggle_play_current)
-        sc(Qt.Key_A, lambda: self._ab_shortcut("original"))
-        sc(Qt.Key_B, lambda: self._ab_shortcut("enhanced"))
-        sc(Qt.Key_P, lambda: self.tabs.currentWidget() is self.batch_page and self.batch_panel.toggle_preview())
-        sc(Qt.Key_Home, lambda: self._seek(0.0))
-        sc("Ctrl+Return", self.enhance)
+        # (menu item, key, action): on a Mac they are menu-bar items (Edit and Playback) that
+        # carry the keys; elsewhere plain shortcuts. One binding per key: two make it
+        # ambiguous and neither fires.
+        self._edit_commands = [
+            ("Undo", QKeySequence.Undo, self._undo_shortcut),
+            ("Redo", QKeySequence.Redo, self._redo_shortcut),
+        ]
+        self._playback_commands = [
+            ("Play / Pause", Qt.Key_Space, self._toggle_play_current),
+            ("Hear Original", Qt.Key_A, lambda: self._ab_shortcut("original")),
+            ("Hear Enhanced", Qt.Key_B, lambda: self._ab_shortcut("enhanced")),
+            ("Loop", Qt.Key_L, lambda: self.audio is not None and self.loop_btn.toggle()),
+            ("Go to Start", Qt.Key_Home, lambda: self._seek(0.0)),
+            None,
+            ("Enhance", "Ctrl+Return", self.enhance),
+            ("Record", Qt.Key_R, self._record_shortcut),
+            ("Edit Take\u2026", Qt.Key_E, self._edit_shortcut),
+            ("Batch Preview", Qt.Key_P,
+             lambda: self.tabs.currentWidget() is self.batch_page and self.batch_panel.toggle_preview()),
+        ]
         sc(Qt.Key_Escape, self._escape)
-        sc(Qt.Key_R, self._record_shortcut)
-        sc(QKeySequence.Undo, self._undo_shortcut)
-        sc(QKeySequence.Redo, self._redo_shortcut)
+        if sys.platform == "darwin":
+            from .mac_menu import build_menu_bar
+
+            build_menu_bar(self)
+            return
+        for cmd in self._edit_commands + self._playback_commands:
+            if cmd is not None:
+                sc(cmd[1], cmd[2])
         # A standard-key shortcut uses only the platform's first binding (Ctrl+Y on Windows), so
-        # add Ctrl+Shift+Z too. On macOS Shift+Cmd+Z already IS that first binding; binding it
-        # twice makes the shortcut ambiguous and neither one fires.
+        # add Ctrl+Shift+Z too. On macOS Shift+Cmd+Z already IS that first binding.
         if QKeySequence(QKeySequence.Redo) != QKeySequence("Ctrl+Shift+Z"):
             sc("Ctrl+Shift+Z", self._redo_shortcut)
-        sc(Qt.Key_L, lambda: self.audio is not None and self.loop_btn.toggle())
-        sc(Qt.Key_E, self._edit_shortcut)
 
     # ============================================================================ state
     def _set_empty_state(self):
@@ -952,6 +934,27 @@ class MainWindow(QMainWindow):
 
         task.finished.connect(go)
 
+    def open_settings(self):
+        """The Settings window (one, brought to the front if it is already open)."""
+        from .settings_dialog import SettingsDialog
+
+        if getattr(self, "_settings_dialog", None) is None:
+            self._settings_dialog = SettingsDialog(self)
+        self._settings_dialog.refresh()
+        self._settings_dialog.show()
+        self._settings_dialog.raise_()
+        self._settings_dialog.activateWindow()
+
+    def _hint_at(self, widget, message: str):
+        """Guidance next to the control that needs it (and in the status line), instead of an
+        alert to dismiss: it goes away by itself when the pointer moves on."""
+        from PySide6.QtWidgets import QToolTip
+
+        self.status_label.setText(message)
+        if widget is not None and widget.isVisible():
+            QToolTip.showText(widget.mapToGlobal(QPoint(0, widget.height() + 4)), message, widget,
+                              widget.rect(), 8000)
+
     def _error(self, title: str, message: str):
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Warning)
@@ -1009,12 +1012,12 @@ class MainWindow(QMainWindow):
         st = mm.status()
         dev_name = st.device.name.removeprefix("NVIDIA ").removeprefix("GeForce ")
         self.device_chip.setText(f"{'GPU' if st.device.kind == 'cuda' else 'CPU'} · {dev_name}")
-        self.device_chip.setToolTip(f"Processing device: {st.device.label}\nChange it in the menu (⋯).")
+        self.device_chip.setToolTip(f"Processing device: {st.device.label}\nChange it in Settings (⋯ menu).")
         if mm.resynth_device.kind == "mps":  # Apple Silicon: noise reduction on the CPU, re-synthesis on the GPU
             self.device_chip.setText(f"CPU + GPU · {dev_name}")
             self.device_chip.setToolTip(
                 f"Noise reduction: {st.device.label}, the fastest for this model\n"
-                f"Voice re-synthesis: {mm.resynth_device.label}\nChange it in the menu (⋯).")
+                f"Voice re-synthesis: {mm.resynth_device.label}\nChange it in Settings (⋯ menu).")
         if st.device.kind != "cuda" and edition() == "standard":
             from ..utils.hardware import nvidia_gpu_name
 
@@ -1341,7 +1344,7 @@ class MainWindow(QMainWindow):
             self._sync_view(seconds - span * 0.1, seconds + span * 0.9)
 
     def _on_player_state(self, state: str):
-        self.play_btn.setText("❚❚" if state == "playing" else "▶")
+        show_play_state(self.play_btn, state == "playing")
 
     def _seek(self, seconds: float):
         self.player.seek(seconds)
@@ -1411,7 +1414,7 @@ class MainWindow(QMainWindow):
         b = self.prompter_btn
         is_open = getattr(self, "prompter", None) is not None
         state = "rec" if is_open and recording else "open" if is_open else ""
-        b.setText("\u25cf  REC \u00b7 TELEPROMPTER" if state == "rec" else "\u25a4  TELEPROMPTER")
+        b.setText("\u25cf  Recording \u00b7 Teleprompter" if state == "rec" else "\u25a4  Teleprompter")
         tips = {"": f"Read a script while it records, one take per section ({shortcut_text('Ctrl+T')})",
                 "open": "The teleprompter is open: click to bring it to the front",
                 "rec": "The teleprompter is recording: click to bring it to the front"}
@@ -1804,15 +1807,17 @@ class MainWindow(QMainWindow):
             self.wave_orig.highlight_regions = []
             self.wave_orig.update()
             return
+        # guidance, not alerts: said at the button and in the status line, nothing to dismiss
         if not self.selection:
-            QMessageBox.information(
-                self, "Learn Noise Profile",
-                "Drag across a part of either waveform where nobody is speaking, so only the background "
-                "noise is selected. Then click “Learn Noise Profile” again.\n\nA second or two is enough.")
+            self._hint_at(self.learn_btn,
+                          "Drag across a part of either waveform where nobody is speaking, so only the "
+                          "background noise is selected (a second or two is enough). Then click "
+                          "“Learn Noise Profile” again.")
             return
         a, b = self.selection
         if b - a < 0.3:
-            QMessageBox.information(self, "Selection too short", "Select at least 0.3 seconds of background noise.")
+            self._hint_at(self.learn_btn, "Select at least 0.3 seconds of background noise, then click "
+                                          "“Learn Noise Profile” again.")
             return
         # warn if the selection looks like it contains speech
         mask = self.analysis.speech_mask
@@ -2227,8 +2232,7 @@ class MainWindow(QMainWindow):
         log.info("Last update install: code %s for %s", outcome.code, outcome.version)
         if outcome.ok and outcome.version == APP_VERSION:
             update_install.cleanup()  # the installer is no longer needed
-            self.status_label.setText(outcome.message())
-            QMessageBox.information(self, "Update installed", outcome.message())
+            self.status_label.setText(outcome.message())  # good news needs no alert on launch
         else:
             QMessageBox.warning(self, "Update not installed", outcome.message())
 
@@ -2260,7 +2264,7 @@ class MainWindow(QMainWindow):
 
     def _update_session_ui(self):
         if hasattr(self, "session_btn"):
-            self.session_btn.setText(f"SESSION \u00b7 {self.session.name}  \u25be")
+            self.session_btn.setText(f"Session \u00b7 {self.session.name}  \u25be")
         self._update_title()
 
     def _confirm_leave_recording(self, proceed, action: str) -> bool:
@@ -2400,9 +2404,6 @@ class MainWindow(QMainWindow):
     def set_theme(self, pref: str):
         self.theme_pref = pref
         mode = theme.apply(QApplication.instance(), pref)
-        if pref in self.theme_actions:
-            self.theme_actions[pref].setChecked(True)
-        self._update_theme_button()
         if getattr(self, "prompter", None) is not None:
             self.prompter.apply_theme()  # it follows the app unless set to Dark or Light
         log.info("Theme: %s (%s)", pref, mode)
@@ -2411,23 +2412,11 @@ class MainWindow(QMainWindow):
         """System or brand fonts, right away."""
         self.config.extra["fonts"] = style
         theme.apply(QApplication.instance(), self.theme_pref, fonts=style)
-        if style in getattr(self, "font_actions", {}):
-            self.font_actions[style].setChecked(True)
         if getattr(self, "prompter", None) is not None:
             self.prompter.apply_theme()
         for w in QApplication.instance().allWidgets():
             w.updateGeometry()
         log.info("Fonts: %s", style)
-
-    def _toggle_theme(self):
-        self.set_theme("day" if theme.MODE == "night" else "night")
-
-    def _update_theme_button(self):
-        if hasattr(self, "theme_btn"):
-            night = theme.MODE == "night"
-            self.theme_btn.setAccessibleName("Switch to day mode" if night else "Switch to night mode")
-            self.theme_btn.setToolTip("Switch to day mode" if night else "Switch to night mode")
-            self.theme_btn.update()
 
     def _system_scheme_changed(self, *_):
         if self.theme_pref == "auto":

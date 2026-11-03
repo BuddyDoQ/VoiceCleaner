@@ -420,9 +420,12 @@ class TeleprompterWindow(QWidget):
         self.theme_btn = self._btn(self.THEME_LABELS[self.prefs.get("theme", "auto")], self._cycle_theme,
                                    "Colours: Auto follows the app's day/night setting; or always Dark or Light")
         row2.addWidget(self.theme_btn)
-        for b, fn, tip in (("⛶", self.toggle_fullscreen, "Fullscreen (F)"), ("Edit", self.open_editor,
-                           "Edit the script (E)"), ("?", self.toggle_help, "Keys (H)")):
-            row2.addWidget(self._btn(b, fn, tip))
+        for b, name, fn, tip in (("⛶", "Full screen", self.toggle_fullscreen, "Fullscreen (F)"),
+                                 ("Edit", "Edit", self.open_editor, "Edit the script (E)"),
+                                 ("?", "Keyboard keys", self.toggle_help, "Keys (H)")):
+            btn = self._btn(b, fn, tip)
+            btn.setAccessibleName(name)
+            row2.addWidget(btn)
         self.set_speed(self.wpm)
         self.set_size(self.stage.size_px, rebuild=False)
 

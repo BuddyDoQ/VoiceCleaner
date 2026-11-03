@@ -116,7 +116,7 @@ class BatchRunner(QObject):
             t0 = time.perf_counter()
             try:
                 out, result = enhance_file(path, self.options, mm, ctx)
-                msg = f"Complete → {out.name} ({result.realtime_factor:.1f}x realtime)"
+                msg = f"Complete ({result.realtime_factor:.1f}x realtime)"  # the file name has its own column
                 self.fileOutput.emit(i, str(out))
                 self.fileFinished.emit(i, True, msg)
                 log.info("Batch file %s done in %.1fs -> %s", path, time.perf_counter() - t0, out)

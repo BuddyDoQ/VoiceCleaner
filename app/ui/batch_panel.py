@@ -20,9 +20,9 @@ from ..utils.errors import VoiceCleanerError
 from ..utils.shell import FILE_MANAGER, open_folder
 from . import theme
 from .audio_player import AudioPlayer
-from .widgets import card, label
+from .widgets import card, icon_button, label, show_play_state
 
-COL_NAME, COL_STATUS, COL_DURATION, COL_PROGRESS = range(4)
+COL_NAME, COL_STATUS, COL_OUTPUT, COL_DURATION, COL_PROGRESS = range(5)
 
 
 class BatchPanel(QWidget):
@@ -53,7 +53,7 @@ class BatchPanel(QWidget):
         self.remove_btn.clicked.connect(self._remove_selected)
         self.clear_btn = QPushButton("Clear")
         self.clear_btn.clicked.connect(self.clear)
-        self.preview_btn = QPushButton("\u25c9 PREVIEW")
+        self.preview_btn = QPushButton("\u25c9 Preview")
         self.preview_btn.setProperty("role", "toggle")
         self.preview_btn.setCheckable(True)
         self.preview_btn.setCursor(Qt.PointingHandCursor)
@@ -68,14 +68,17 @@ class BatchPanel(QWidget):
                             "the settings on the right (the same as in the Enhance tab), then saved as a new file. "
                             "Double-click a finished file to compare it in the Enhance tab.", "muted", wrap=True))
 
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["File", "Status", "Duration", "Progress"])
+        # the saved file has its own column: in Status it was cut off ("Complete → Episode 12 - …")
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["File", "Status", "Saved As", "Duration", "Progress"])
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(COL_NAME, QHeaderView.Stretch)
-        hh.setSectionResizeMode(COL_STATUS, QHeaderView.Stretch)
+        hh.setSectionResizeMode(COL_STATUS, QHeaderView.Interactive)
+        self.table.setColumnWidth(COL_STATUS, 220)
+        hh.setSectionResizeMode(COL_OUTPUT, QHeaderView.Stretch)
         hh.setSectionResizeMode(COL_DURATION, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(COL_PROGRESS, QHeaderView.Fixed)
-        self.table.setColumnWidth(COL_PROGRESS, 180)
+        self.table.setColumnWidth(COL_PROGRESS, 140)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -220,6 +223,8 @@ class BatchPanel(QWidget):
         for r in range(len(self.files)):
             self._set_status(r, "Waiting")
             self._bar(r).setValue(0)
+            self._bar(r).setVisible(True)
+            self.table.setItem(r, COL_OUTPUT, QTableWidgetItem(""))
         self.outputs.clear()
         self.startRequested.emit(list(self.files), self.output_dir)
 
@@ -243,6 +248,7 @@ class BatchPanel(QWidget):
         self._set_status(i, ("✓ " if ok else "✕ ") + msg, "done" if ok else "error")
         if ok:
             self._bar(i).setValue(1000)
+            self._bar(i).setVisible(False)  # the tick says it: a full bar on every row was noise
             self._done += 1
         else:
             self._failed += 1
@@ -253,6 +259,9 @@ class BatchPanel(QWidget):
         item = self.table.item(i, COL_NAME)
         if item is not None:
             item.setToolTip(f"{self.files[i]}\n\u2192 {path}\nDouble-click to compare it in the Enhance tab.")
+        out = QTableWidgetItem(Path(path).name)
+        out.setToolTip(f"{path}\nDouble-click to compare it in the Enhance tab.")
+        self.table.setItem(i, COL_OUTPUT, out)
 
     def _open_row(self, row: int, _col: int):
         out = self.outputs.get(row)
@@ -268,7 +277,7 @@ class BatchPanel(QWidget):
     def _build_preview(self) -> QWidget:
         self.preview_path: Path | None = None
         self.player = AudioPlayer(self, routing=self._audio_routing)
-        self.player.stateChanged.connect(lambda s: self.play_btn.setText("\u275a\u275a" if s == "playing" else "\u25b6"))
+        self.player.stateChanged.connect(lambda s: show_play_state(self.play_btn, s == "playing"))
         c = card()
         self.preview_card = c
         v = QVBoxLayout(c)
@@ -284,8 +293,8 @@ class BatchPanel(QWidget):
         top.addWidget(self.preview_state)
         v.addLayout(top)
         row = QHBoxLayout()
-        self.ab_orig = QPushButton("ORIGINAL")
-        self.ab_enh = QPushButton("ENHANCED")
+        self.ab_orig = QPushButton("Original")
+        self.ab_enh = QPushButton("Enhanced")
         group = QButtonGroup(self)
         for b, side in ((self.ab_orig, "left"), (self.ab_enh, "right")):
             b.setProperty("role", "ab")
@@ -304,13 +313,10 @@ class BatchPanel(QWidget):
         ab.addWidget(self.ab_enh)
         row.addLayout(ab)
         row.addSpacing(8)
-        self.play_btn = QPushButton("\u25b6")
-        self.play_btn.setProperty("role", "round")
-        self.play_btn.setToolTip("Play / pause the sample (Space)")
+        self.play_btn = icon_button("\u25b6", "Play", "round", "Play / pause the sample (Space)")
         self.play_btn.clicked.connect(self.toggle_play)
         row.addWidget(self.play_btn)
-        stop = QPushButton("\u25a0")
-        stop.setProperty("role", "icon")
+        stop = icon_button("\u25a0", "Stop", tooltip="Stop")
         stop.clicked.connect(self.player.stop)
         row.addWidget(stop)
         row.addStretch(1)

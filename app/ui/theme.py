@@ -17,6 +17,7 @@ import re
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 
 ASSETS = Path(__file__).resolve().parent / "assets"
@@ -32,15 +33,20 @@ NIGHT = {
     "BORDER_STRONG": "#3b3b52",  # --border-strong
     "TEXT": "#eeeef8",  # --text-primary
     "MUTED": "#b8b8d0",  # --text-secondary
-    "FAINT": "#6e6e8a",  # --text-muted
+    "FAINT": "#8a8aa6",  # --text-muted, lifted to 4.7:1 on inset panels (was #6e6e8a, 3.6:1)
+    "CONTROL_BORDER": "#8a8aa6",  # check box outlines: 3:1 or more against what is around them
     "ACCENT": "#60a5fa",  # --accent-blue  (primary, Enhanced)
     "ACCENT_DARK": "#3b82f6",
-    "ACCENT_TEXT": "#ffffff",
+    "ACCENT_INK": "#60a5fa",  # accent as text on the page
+    "ACCENT_TEXT": "#07070e",  # text on an ACCENT fill: dark, 7.9:1 (white was 2.5:1)
     "ORIGINAL": "#a78bfa",  # --accent-purple (Original)
+    "ORIGINAL_TEXT": "#07070e",  # text on an ORIGINAL fill, 7.4:1
     "WARNING": "#fbbf24",
     "ERROR": "#f87171",
     "SUCCESS": "#4ade80",
     "RECORD": "#ff5a5f",
+    "RECORD_TEXT": "#07070e",  # text on a RECORD fill, 6.6:1
+    "RECORD_HOVER": "#ff7377",
     "WAVE_ORIGINAL": "#a78bfa",
     "WAVE_ENHANCED": "#60a5fa",
     "PLAYHEAD": "#ffffff",  # playhead on the waveform being heard
@@ -55,15 +61,20 @@ DAY = {
     "BORDER_STRONG": "#c3c3cc",
     "TEXT": "#0a0a12",
     "MUTED": "#363645",
-    "FAINT": "#6e6e8a",
-    "ACCENT": "#3b82f6",
-    "ACCENT_DARK": "#2563eb",
+    "FAINT": "#5f5f7a",  # 5.1:1 on inset panels (was #6e6e8a, 4.0:1)
+    "CONTROL_BORDER": "#6e6e8a",
+    "ACCENT": "#2563eb",  # white text on it 5.2:1 (was #3b82f6, 3.7:1)
+    "ACCENT_DARK": "#1d4ed8",
+    "ACCENT_INK": "#1d4ed8",  # accent as text on the page: 5.5:1 on the sidebar
     "ACCENT_TEXT": "#ffffff",
-    "ORIGINAL": "#8b5cf6",
+    "ORIGINAL": "#7c3aed",  # white text on it 5.7:1 (was #8b5cf6, 4.2:1)
+    "ORIGINAL_TEXT": "#ffffff",
     "WARNING": "#b45309",
     "ERROR": "#dc2626",
     "SUCCESS": "#15803d",
-    "RECORD": "#e5383b",
+    "RECORD": "#c81e1e",  # white text on it 5.7:1 (was #e5383b, 4.2:1)
+    "RECORD_TEXT": "#ffffff",
+    "RECORD_HOVER": "#a51b1b",
     "WAVE_ORIGINAL": "#8b5cf6",
     "WAVE_ENHANCED": "#3b82f6",
     "PLAYHEAD": "#0a0a12",  # dark on the light background (white was invisible)
@@ -71,8 +82,8 @@ DAY = {
 
 # current values (night by default); replaced by apply()
 BG = BG_ALT = SURFACE = SURFACE_2 = SURFACE_3 = BORDER = BORDER_STRONG = ""
-TEXT = MUTED = FAINT = ACCENT = ACCENT_DARK = ACCENT_TEXT = ORIGINAL = ""
-WARNING = ERROR = SUCCESS = RECORD = WAVE_ORIGINAL = WAVE_ENHANCED = PLAYHEAD = ""
+TEXT = MUTED = FAINT = CONTROL_BORDER = ACCENT = ACCENT_DARK = ACCENT_INK = ACCENT_TEXT = ORIGINAL = ORIGINAL_TEXT = ""
+WARNING = ERROR = SUCCESS = RECORD = RECORD_TEXT = RECORD_HOVER = WAVE_ORIGINAL = WAVE_ENHANCED = PLAYHEAD = ""
 MODE = "night"
 STYLESHEET = ""
 
@@ -198,7 +209,7 @@ def palette() -> QPalette:
     p.setColor(QPalette.Button, QColor(SURFACE_2))
     p.setColor(QPalette.ButtonText, QColor(TEXT))
     p.setColor(QPalette.Highlight, QColor(ACCENT_DARK))
-    p.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    p.setColor(QPalette.HighlightedText, QColor(ACCENT_TEXT))
     p.setColor(QPalette.ToolTipBase, QColor(SURFACE))
     p.setColor(QPalette.ToolTipText, QColor(TEXT))
     p.setColor(QPalette.PlaceholderText, QColor(FAINT))
@@ -209,7 +220,42 @@ def palette() -> QPalette:
     return p
 
 
+def _check_image(color: str) -> str:
+    """A tick for ticked check boxes, drawn in ``color`` and cached as a PNG (no SVG plugin needed).
+    Drawn at 32 px and scaled into the 16 px box, so it stays sharp on high-DPI screens."""
+    import tempfile
+
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QImage, QPainter, QPainterPath, QPen
+
+    folder = Path(tempfile.gettempdir()) / "VoiceCleaner-ui"
+    path = folder / f"check-{color.lstrip('#').lower()}.png"
+    if not path.exists():
+        folder.mkdir(parents=True, exist_ok=True)
+        img = QImage(32, 32, QImage.Format_ARGB32_Premultiplied)
+        img.fill(0)
+        p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(color), 4.0)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        tick = QPainterPath(QPointF(7, 16.5))
+        tick.lineTo(13.5, 23)
+        tick.lineTo(25, 9.5)
+        p.drawPath(tick)
+        p.end()
+        tmp = path.with_suffix(f".{os.getpid()}.png")
+        img.save(str(tmp), "PNG")
+        os.replace(tmp, path)
+    return path.as_posix()
+
+
 def build_stylesheet() -> str:
+    try:
+        check, check_disabled = _check_image(ACCENT_TEXT), _check_image(FAINT)
+    except Exception:  # no tick image (unwritable temp folder): the box still fills with the accent
+        check = check_disabled = ""
     mono = f"'{FONT_MONO}', Consolas, monospace"
     brand_disp = f"'{BRAND_DISPLAY}', Impact, sans-serif"
     if FONT_STYLE == "brand":
@@ -234,7 +280,7 @@ QLabel[role="value"] {{ font-size: 11pt; font-weight: 700; }}
 QLabel[role="mono"] {{ font-family: {mono}; font-size: 10pt; }}
 QLabel[role="status"] {{ color: {MUTED}; font-family: {mono}; font-size: 8.5pt; background: transparent; padding: 0 2px; }}
 QLabel[role="meta"] {{ color: {FAINT}; font-family: {mono}; font-size: 8pt; background: transparent; }}
-QLabel[tone="accent"] {{ color: {ACCENT}; }}
+QLabel[tone="accent"] {{ color: {ACCENT_INK}; }}
 QLabel[tone="original"] {{ color: {ORIGINAL}; }}
 QLabel[tone="record"] {{ color: {RECORD}; }}
 QLabel[tone="warning"] {{ color: {WARNING}; }}
@@ -246,11 +292,11 @@ QLabel[role="brand"] {{ font-family: {brand_disp}; font-size: 19pt; letter-spaci
 QLabel[role="wordmark"] {{ font-family: {brand_disp}; font-size: 30pt; letter-spacing: 1px; }}
 QLabel[role="brandsub"] {{ font-family: {mono}; font-size: 7.5pt; color: {FAINT}; letter-spacing: 2px; }}
 QLabel[role="eqvalue"] {{ color: {FAINT}; font-family: {mono}; font-size: 7.5pt; }}
-QLabel[role="eqvalue"][active="true"] {{ color: {ACCENT}; }}
+QLabel[role="eqvalue"][active="true"] {{ color: {ACCENT_INK}; }}
 QLabel[role="tag"] {{ font-family: {mono}; font-size: 7.5pt; letter-spacing: 1px; color: {WARNING}; }}
 QFrame[role="smartnote"] {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-left: 3px solid {ACCENT}; border-radius: 4px; }}
 QLabel[role="smartnotetext"] {{ background: transparent; border: none; color: {MUTED}; font-size: 8.5pt; }}
-QLabel[auto="true"] {{ color: {ACCENT}; font-family: {mono}; font-size: 8pt; }}
+QLabel[auto="true"] {{ color: {ACCENT_INK}; font-family: {mono}; font-size: 8pt; }}
 
 QFrame[role="card"] {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 10px; }}
 QFrame[role="inset"] {{ background: {SURFACE_2}; border: 1px solid {BORDER}; border-radius: 10px; }}
@@ -264,17 +310,18 @@ QPushButton {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; borde
 QPushButton:hover {{ border-color: {ACCENT}; }}
 QPushButton:pressed {{ background: {SURFACE_3}; }}
 QPushButton:disabled {{ color: {FAINT}; background: {SURFACE}; border-color: {BORDER}; }}
-QPushButton[role="primary"] {{ background: {ACCENT}; color: {ACCENT_TEXT}; border: none; font-family: {mono}; font-weight: 500; font-size: 9.5pt; letter-spacing: 2px; padding: 11px 18px; border-radius: 4px; }}
+/* buttons: Title Case in the interface font. Monospace capitals are kept for labels, tabs and readouts */
+QPushButton[role="primary"] {{ background: {ACCENT}; color: {ACCENT_TEXT}; border: none; font-weight: 600; font-size: 10pt; padding: 10px 18px; border-radius: 4px; }}
 QPushButton[role="primary"]:hover {{ background: {ACCENT_DARK}; }}
 QPushButton[role="primary"]:disabled {{ background: {SURFACE_3}; color: {FAINT}; }}
-QPushButton[role="activity"] {{ background: {SURFACE_2}; border: 1px solid {ACCENT}; border-radius: 4px; padding: 5px 12px; color: {ACCENT}; font-family: {mono}; font-size: 8pt; }}
+QPushButton[role="activity"] {{ background: {SURFACE_2}; border: 1px solid {ACCENT}; border-radius: 4px; padding: 5px 12px; color: {ACCENT_INK}; font-family: {mono}; font-size: 8pt; }}
 QPushButton[role="activity"]:hover {{ background: {SURFACE_3}; }}
-QPushButton[role="toggle"] {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; padding: 7px 12px; font-family: {mono}; font-size: 8.5pt; letter-spacing: 1px; color: {MUTED}; }}
+QPushButton[role="toggle"] {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; padding: 7px 12px; color: {MUTED}; }}
 QPushButton[role="toggle"]:checked {{ background: {ACCENT}; border-color: {ACCENT}; color: {ACCENT_TEXT}; }}
 QPushButton[role="ghost"] {{ background: transparent; border: none; color: {MUTED}; padding: 6px 8px; }}
-QPushButton[role="ghost"]:hover {{ color: {ACCENT}; }}
-QPushButton[role="outline"] {{ background: transparent; border: 1px solid {BORDER_STRONG}; font-family: {mono}; letter-spacing: 1px; }}
-QPushButton[role="outline"]:hover {{ border-color: {ACCENT}; color: {ACCENT}; }}
+QPushButton[role="ghost"]:hover {{ color: {ACCENT_INK}; }}
+QPushButton[role="outline"] {{ background: transparent; border: 1px solid {BORDER_STRONG}; }}
+QPushButton[role="outline"]:hover {{ border-color: {ACCENT}; color: {ACCENT_INK}; }}
 QPushButton[role="round"] {{ border-radius: 22px; min-width: 44px; max-width: 44px; min-height: 44px; max-height: 44px; padding: 0; background: {TEXT}; color: {BG}; border: none; font-size: 14pt; }}
 QPushButton[role="round"]:hover {{ background: {ACCENT}; color: {ACCENT_TEXT}; }}
 QPushButton[role="round"]:disabled {{ background: {SURFACE_3}; color: {FAINT}; }}
@@ -282,29 +329,29 @@ QPushButton[role="icon"] {{ border-radius: 17px; min-width: 34px; max-width: 34p
 QPushButton[role="themetoggle"] {{ border-radius: 17px; min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px; padding: 0; font-size: 12pt; background: transparent; border: 1px solid {BORDER_STRONG}; }}
 QPushButton[role="themetoggle"]:hover {{ border-color: {ACCENT}; }}
 
-QPushButton[role="ab"] {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; padding: 9px 18px; font-family: {mono}; font-weight: 500; letter-spacing: 2px; font-size: 8.5pt; color: {MUTED}; }}
+QPushButton[role="ab"] {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; padding: 8px 18px; font-weight: 600; color: {MUTED}; }}
 QPushButton[role="ab"][side="left"] {{ border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: none; }}
 QPushButton[role="ab"][side="right"] {{ border-top-left-radius: 0; border-bottom-left-radius: 0; }}
-QPushButton[role="ab"][side="left"]:checked {{ background: {ORIGINAL}; color: #ffffff; border-color: {ORIGINAL}; }}
+QPushButton[role="ab"][side="left"]:checked {{ background: {ORIGINAL}; color: {ORIGINAL_TEXT}; border-color: {ORIGINAL}; }}
 QPushButton[role="ab"][side="right"]:checked {{ background: {ACCENT}; color: {ACCENT_TEXT}; border-color: {ACCENT}; }}
-QPushButton[role="seg"] {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; border-radius: 0; padding: 9px 16px; font-family: {mono}; font-weight: 500; letter-spacing: 2px; font-size: 8.5pt; color: {MUTED}; }}
+QPushButton[role="seg"] {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; border-radius: 0; padding: 8px 16px; font-weight: 600; color: {MUTED}; }}
 QPushButton[role="seg"][side="left"] {{ border-top-left-radius: 4px; border-bottom-left-radius: 4px; }}
 QPushButton[role="seg"][side="right"] {{ border-top-right-radius: 4px; border-bottom-right-radius: 4px; }}
 QPushButton[role="seg"]:checked {{ background: {ACCENT}; color: {ACCENT_TEXT}; border-color: {ACCENT}; }}
 QPushButton[role="seg"]:hover:!checked {{ color: {TEXT}; border-color: {ACCENT}; }}
 QPushButton[role="record"] {{ background: transparent; border: 1px solid {BORDER_STRONG}; color: {TEXT}; padding: 6px 12px; }}
 QPushButton[role="record"]:hover {{ border-color: {RECORD}; }}
-QPushButton[role="record"]:checked {{ background: {RECORD}; border-color: {RECORD}; color: #ffffff; font-weight: 600; }}
-QPushButton[role="recbig"] {{ background: {RECORD}; color: #ffffff; border: none; padding: 10px 18px; font-family: {mono}; font-weight: 500; letter-spacing: 1px; font-size: 9.5pt; }}
-QPushButton[role="recbig"]:hover {{ background: #ff7377; }}
+QPushButton[role="record"]:checked {{ background: {RECORD}; border-color: {RECORD}; color: {RECORD_TEXT}; font-weight: 600; }}
+QPushButton[role="recbig"] {{ background: {RECORD}; color: {RECORD_TEXT}; border: none; padding: 10px 18px; font-weight: 600; font-size: 10pt; }}
+QPushButton[role="recbig"]:hover {{ background: {RECORD_HOVER}; }}
 QPushButton[role="recbig"]:disabled {{ background: {SURFACE_3}; color: {FAINT}; }}
-QPushButton[role="session"] {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; padding: 5px 12px; font-family: {mono}; font-size: 8.5pt; }}
+QPushButton[role="session"] {{ background: {SURFACE_2}; border: 1px solid {BORDER_STRONG}; padding: 5px 12px; }}
 QPushButton[role="session"]::menu-indicator {{ image: none; width: 0; }}
-QPushButton[role="session"][state="open"] {{ border-color: {ACCENT}; color: {ACCENT}; }}
+QPushButton[role="session"][state="open"] {{ border-color: {ACCENT}; color: {ACCENT_INK}; }}
 QPushButton[role="session"][state="rec"] {{ border-color: {RECORD}; color: {RECORD}; font-weight: 700; }}
 
 QToolButton[role="link"] {{ border: none; color: {MUTED}; padding: 4px 0; }}
-QToolButton[role="link"]:hover {{ color: {ACCENT}; }}
+QToolButton[role="link"]:hover {{ color: {ACCENT_INK}; }}
 QToolButton[role="disclosure"] {{ border: none; color: {TEXT}; font-weight: 700; font-size: 10pt; padding: 4px 0; }}
 QToolButton[role="disclosure-muted"] {{ border: none; color: {MUTED}; font-weight: 700; padding: 4px 0; }}
 QToolButton[role="disclosure-muted"]:hover {{ color: {TEXT}; }}
@@ -337,8 +384,11 @@ QProgressBar {{ background: {SURFACE_3}; border: none; border-radius: 2px; heigh
 QProgressBar::chunk {{ background: {ACCENT}; border-radius: 2px; }}
 
 QCheckBox {{ spacing: 8px; }}
-QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 3px; border: 1px solid {BORDER_STRONG}; background: {SURFACE_2}; }}
-QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; image: none; }}
+/* the outline stands out (3:1 or more) and a ticked box shows a tick, not just a colour */
+QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 3px; border: 1px solid {CONTROL_BORDER}; background: {SURFACE_2}; }}
+QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; image: url("{check}"); }}
+QCheckBox::indicator:disabled {{ border-color: {BORDER_STRONG}; }}
+QCheckBox::indicator:checked:disabled {{ background: {SURFACE_3}; border-color: {BORDER_STRONG}; image: url("{check_disabled}"); }}
 
 QScrollArea {{ border: none; background: transparent; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
@@ -352,7 +402,7 @@ QTabWidget::pane {{ border: none; }}
 QTabBar::tab {{ background: {SURFACE_2}; color: {MUTED}; padding: 7px 20px; margin: 10px 6px 0 0; border: 1px solid {BORDER}; border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; font-family: {mono}; font-size: 8.5pt; letter-spacing: 2px; }}
 QTabBar::tab:hover {{ background: {SURFACE_3}; color: {TEXT}; }}
 /* the selected tab is part of the page: page colour, no line under it, taller, accent edge on top */
-QTabBar::tab:selected {{ background: {BG}; color: {ACCENT}; border: 1px solid {BORDER_STRONG}; border-top: 3px solid {ACCENT}; border-bottom: none; margin-top: 4px; margin-bottom: -1px; padding: 9px 20px 9px 20px; }}
+QTabBar::tab:selected {{ background: {BG}; color: {ACCENT_INK}; border: 1px solid {BORDER_STRONG}; border-top: 3px solid {ACCENT}; border-bottom: none; margin-top: 4px; margin-bottom: -1px; padding: 9px 20px 9px 20px; }}
 /* the bar measures each tab with its own font: give it the tabs' font and spacing, or a wider
    monospace face (system fonts: SF Mono / Menlo) is cut short ("ENHAN...") */
 QTabBar {{ border-bottom: 1px solid {BORDER_STRONG}; font-family: {mono}; font-size: 8.5pt; letter-spacing: 2px; }}
@@ -368,6 +418,16 @@ QMenu::item:selected {{ background: {SURFACE_3}; }}
 QMenu::item:disabled {{ color: {FAINT}; }}
 QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 8px; }}
 QMessageBox {{ background: {BG}; }}
+
+/* keyboard focus: a ring on the control reached with Tab (focus_ring.py sets focusring) */
+QPushButton[focusring="true"], QToolButton[focusring="true"] {{ border: 2px solid {ACCENT}; }}
+QPushButton[role="primary"][focusring="true"], QPushButton[role="recbig"][focusring="true"],
+QPushButton[role="round"][focusring="true"], QPushButton[focusring="true"]:checked {{ border: 2px solid {TEXT}; }}
+QCheckBox[focusring="true"]::indicator {{ border: 2px solid {ACCENT}; }}
+QCheckBox[focusring="true"]::indicator:checked {{ border: 2px solid {TEXT}; }}
+QTabBar[focusring="true"]::tab:selected {{ border: 2px solid {ACCENT}; border-top: 3px solid {ACCENT}; border-bottom: none; }}
+QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {ACCENT}; }}
+QTableWidget[focusring="true"], QTreeWidget[focusring="true"], QListWidget[focusring="true"] {{ border: 2px solid {ACCENT}; }}
 """)
 
 

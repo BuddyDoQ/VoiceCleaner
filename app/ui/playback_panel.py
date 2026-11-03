@@ -24,7 +24,7 @@ from ..utils.shell import FILE_MANAGER, open_folder, reveal
 from ..workers.processing_worker import run_task
 from .audio_player import AudioPlayer
 from .waveform import WaveformOverview, WaveformView
-from .widgets import ElidedLabel, TimeLabel, card, label
+from .widgets import ElidedLabel, TimeLabel, card, icon_button, label, show_play_state
 
 log = get_logger("playback")
 
@@ -105,9 +105,9 @@ class PlaybackPanel(QWidget):
         self.src_buttons = {}
         group = QButtonGroup(self)
         for i, (key, text, tip) in enumerate([
-            ("session", "THIS SESSION", "Recordings and exports of the current session"),
-            ("all", "ALL RECORDINGS", "Every session in the default recordings folder"),
-            ("folder", "BROWSE FOLDER…", "Choose any folder; all playable WAV files in it are listed"),
+            ("session", "This Session", "Recordings and exports of the current session"),
+            ("all", "All Recordings", "Every session in the default recordings folder"),
+            ("folder", "Browse Folder…", "Choose any folder; all playable WAV files in it are listed"),
         ]):
             b = QPushButton(text)
             b.setProperty("role", "seg")
@@ -126,9 +126,7 @@ class PlaybackPanel(QWidget):
         self.search.setFixedWidth(220)
         self.search.textChanged.connect(self._apply_filter)
         head.addWidget(self.search)
-        refresh = QPushButton("↻")
-        refresh.setProperty("role", "icon")
-        refresh.setToolTip("Rescan")
+        refresh = icon_button("↻", "Rescan", tooltip="Rescan")
         refresh.clicked.connect(self.refresh)
         head.addWidget(refresh)
         outer.addLayout(head)
@@ -188,13 +186,10 @@ class PlaybackPanel(QWidget):
         v.addWidget(self.wave, 1)
         row = QHBoxLayout()
         row.setSpacing(10)
-        self.play_btn = QPushButton("▶")
-        self.play_btn.setProperty("role", "round")
-        self.play_btn.setToolTip("Play / Pause (Space)")
+        self.play_btn = icon_button("▶", "Play", "round", "Play / Pause (Space)")
         self.play_btn.clicked.connect(self.toggle_play)
         row.addWidget(self.play_btn)
-        stop = QPushButton("■")
-        stop.setProperty("role", "icon")
+        stop = icon_button("■", "Stop", tooltip="Stop")
         stop.clicked.connect(self.player.stop)
         row.addWidget(stop)
         self.time_label = TimeLabel()
@@ -417,7 +412,7 @@ class PlaybackPanel(QWidget):
         self.time_label.setText(f"{format_duration(seconds)} / {format_duration(getattr(self, '_duration', 0.0))}")
 
     def _on_state(self, state: str):
-        self.play_btn.setText("❚❚" if state == "playing" else "▶")
+        show_play_state(self.play_btn, state == "playing")
 
     def shutdown(self):
         self.player.shutdown()

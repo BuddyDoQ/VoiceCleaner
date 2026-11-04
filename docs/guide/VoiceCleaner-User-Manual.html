@@ -345,7 +345,7 @@ footer.end img { width: 28px; }
 <tr><td><kbd>Ctrl</kbd>+<kbd>T</kbd></td><td>Teleprompter</td><td><kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>All shortcuts</td></tr>
 </table>
 </div>
-<aside class="footnotes"><div class="fn-title">Notes</div><ol><li id="fn1" value="1">The GPU edition is a web installer: it downloads about 2 GB of NVIDIA CUDA libraries during installation, so it needs an internet connection the first time. <a class="fn-back" href="#fnref1" aria-label="Back to text">↩</a></li><li id="fn2" value="2">Code signing is a paid certificate that tells Windows SmartScreen who published a program. Without it, SmartScreen warns about any new download until it has seen enough installs. The installer is the same either way. <a class="fn-back" href="#fnref2" aria-label="Back to text">↩</a></li><li id="fn3" value="3">M4A, AAC, WMA, AMR and video files are decoded by the FFmpeg that ships with the Windows downloads. On a Mac they open once the Mac download includes FFmpeg as well; WAV, MP3, FLAC, Opus/OGG, AIFF and CAF open there already. See <a href="#formats">Supported input</a>. <a class="fn-back" href="#fnref3" aria-label="Back to text">↩</a></li><li id="fn4" value="4">A third of a second of steady noise before the first word is enough. The learned profile is shown next to the button, under Noise Reduction; <span class="ui">Clear Noise Profile</span> undoes it. <a class="fn-back" href="#fnref4" aria-label="Back to text">↩</a></li><li id="fn5" value="5">Louder almost always sounds “better” to the ear. Matching loudness removes that bias from the comparison. <a class="fn-back" href="#fnref5" aria-label="Back to text">↩</a></li></ol></aside></section>
+<aside class="footnotes"><div class="fn-title">Notes</div><ol><li id="fn1" value="1">The GPU edition is a web installer: it downloads about 2 GB of NVIDIA CUDA libraries during installation, so it needs an internet connection the first time. <a class="fn-back" href="#fnref1" aria-label="Back to text">↩</a></li><li id="fn2" value="2">Code signing is a paid certificate that tells Windows SmartScreen who published a program. Without it, SmartScreen warns about any new download until it has seen enough installs. The installer is the same either way. <a class="fn-back" href="#fnref2" aria-label="Back to text">↩</a></li><li id="fn3" value="3">M4A, AAC, WMA, AMR and video files are decoded by the LGPL build of FFmpeg included in the Windows and Mac downloads; WAV, MP3, FLAC, Opus/OGG, AIFF and CAF are opened directly. See <a href="#formats">Supported input</a>. <a class="fn-back" href="#fnref3" aria-label="Back to text">↩</a></li><li id="fn4" value="4">A third of a second of steady noise before the first word is enough. The learned profile is shown next to the button, under Noise Reduction; <span class="ui">Clear Noise Profile</span> undoes it. <a class="fn-back" href="#fnref4" aria-label="Back to text">↩</a></li><li id="fn5" value="5">Louder almost always sounds “better” to the ear. Matching loudness removes that bias from the comparison. <a class="fn-back" href="#fnref5" aria-label="Back to text">↩</a></li></ol></aside></section>
 
 <section class="chapter" id="window">
 <h1><span class="num">03</span>The Window at a Glance</h1>
@@ -380,7 +380,7 @@ footer.end img { width: 28px; }
 <li><span class="ui">Audio Output</span>: where all playback goes. See <a href="#appearance">Settings</a>.</li>
 <li><span class="ui">Settings…</span> (<kbd>Ctrl</kbd>+<kbd>,</kbd>): appearance, contrast, fonts, processing device and update checks.</li>
 <li><span class="ui">Teleprompter…</span></li>
-<li><span class="ui">Getting Started</span>, <span class="ui">What's New</span>, <span class="ui">Keyboard Shortcuts</span>, <span class="ui">Show Tips Again</span></li>
+<li><span class="ui">User Manual</span> (<kbd>F1</kbd>), <span class="ui">Getting Started</span>, <span class="ui">What's New</span>, <span class="ui">Keyboard Shortcuts</span>, <span class="ui">Show Tips Again</span></li>
 <li><span class="ui">Open Log Folder</span>, <span class="ui">Models and Licenses</span>, <span class="ui">Check for Updates…</span>, <span class="ui">About VoiceCleaner</span></li>
 </ul>
 </div>
@@ -445,7 +445,7 @@ Episode 12 - Compilation.wav       the Compile tab's result</pre>
 <h3>Edit Take</h3>
 <p>Click <span class="ui">✂ Edit Take…</span> above the Original track (or right-click a track, or press <kbd>E</kbd>) to cut out a pop, a click or a stumble. Select it, then <strong>Cut</strong> it (<kbd>X</kbd> or <kbd>Delete</kbd>, crossfaded) or <strong>Silence</strong> it (<kbd>S</kbd>, keeps the timing). Edits apply to both tracks, so A/B still compares the same audio, and they are used when you export. The original file is never changed; the edits are kept with the session and shared with the Compile tab. <span class="ui">Clear Edits</span> removes them.</p>
 <h3>Undo and redo</h3>
-<p>Settings changes can be undone with <kbd>Ctrl</kbd>+<kbd>Z</kbd> and redone with <kbd>Ctrl</kbd>+<kbd>Y</kbd> (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>), or the ↶ ↷ buttons next to the preset. A slider drag is one step; the button's tooltip names the change.</p>
+<p>Settings changes can be undone with <kbd>Ctrl</kbd>+<kbd>Z</kbd> and redone with <kbd>Ctrl</kbd>+<kbd>Y</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> (on a Mac, <kbd>⇧ Shift</kbd>+<kbd>⌘ Cmd</kbd>+<kbd>Z</kbd>), or the ↶ ↷ buttons next to the preset. A slider drag is one step; the button's tooltip names the change.</p>
 <aside class="footnotes"><div class="fn-title">Notes</div><ol><li id="fn7" value="7">LUFS (Loudness Units relative to Full Scale) measures perceived loudness over the whole recording, per ITU-R BS.1770-4. −16 LUFS is the usual level for podcasts and online video; broadcast uses −23 (Europe) or −24 (US). <a class="fn-back" href="#fnref7" aria-label="Back to text">↩</a></li><li id="fn8" value="8">dBTP is decibels relative to full scale, measured as “true peak” (with oversampling), which catches peaks a plain sample meter misses. A ceiling of −1 dBTP leaves room for MP3 and streaming encoders. <a class="fn-back" href="#fnref8" aria-label="Back to text">↩</a></li></ol></aside></section>
 
 <section class="chapter" id="settings">
@@ -725,11 +725,12 @@ VoiceCleanerCLI --list-presets</pre>
 <tr><td><kbd>L</kbd></td><td>Loop selection / recording</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>New session</td></tr>
 <tr><td><kbd>R</kbd></td><td>Record / stop</td><td><kbd>Ctrl</kbd>+<kbd>T</kbd></td><td>Teleprompter</td></tr>
 <tr><td><kbd>E</kbd></td><td>Edit take</td><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo a settings change</td></tr>
-<tr><td><kbd>X</kbd> / <kbd>Del</kbd></td><td>Cut (in the take editor)</td><td><kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Redo</td></tr>
+<tr><td><kbd>X</kbd> / <kbd>Del</kbd></td><td>Cut (in the take editor)</td><td><kbd>Ctrl</kbd>+<kbd>Y</kbd> (Mac: <kbd>⇧</kbd><kbd>⌘</kbd><kbd>Z</kbd>)</td><td>Redo</td></tr>
 <tr><td><kbd>S</kbd></td><td>Silence (in the take editor)</td><td><kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>Shortcut list</td></tr>
 <tr><td><kbd>P</kbd></td><td>Batch preview on/off</td><td><kbd>Ctrl</kbd>+wheel</td><td>Zoom the waveform</td></tr>
 <tr><td><kbd>Esc</kbd></td><td>Cancel</td><td>Double-click</td><td>Reset a slider</td></tr>
 <tr><td><kbd>Tab</kbd></td><td>Next control (a ring shows where you are)</td><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Settings</td></tr>
+<tr><td></td><td></td><td><kbd>F1</kbd> (Mac: <kbd>⌘</kbd><kbd>?</kbd>)</td><td>This user manual</td></tr>
 </tbody>
 </table>
 <p>The teleprompter has its own keys; see <a href="#teleprompter">Chapter 8</a>, or press <kbd>H</kbd> in it.</p>
@@ -809,10 +810,10 @@ VoiceCleanerCLI --list-presets</pre>
 <dd>Allow microphone access in the system privacy settings (see <a href="#recording">Recording</a>), check the trim, and click <span class="ui">↻ Refresh devices</span> after plugging in a microphone.</dd>
 <dt>Playback stopped and an output is shown as unavailable.</dt>
 <dd>The selected output was disconnected. Reconnect it and press Play, or pick another one in <span class="ui">⋯ → Audio Output</span>.</dd>
-<dt>An M4A or video file won't open on a Mac.</dt>
-<dd>Those formats need FFmpeg, which the Mac download does not include yet. Convert the file to WAV first, or use the Windows version.</dd>
+<dt>An M4A or video file won't open.</dt>
+<dd>VoiceCleaner opens them with the FFmpeg it includes. If one still fails, the file may be damaged or use the sound of a DRM-protected video; the log (<span class="ui">⋯ → Open Log Folder</span>) names the reason. Converting it to WAV in another app works around it.</dd>
 <dt>Enhancing is slow.</dt>
-<dd>On a CPU, processing (and especially Voice Re-synthesis) takes longer. Use the GPU edition on a PC with an NVIDIA card, check <span class="ui">⋯ → Processing device</span>, and keep Re-synthesis at 0% unless you need it.</dd>
+<dd>On a CPU, processing (and especially Voice Re-synthesis) takes longer. Use the GPU edition on a PC with an NVIDIA card, check <span class="ui">Settings → Processing device</span>, and keep Re-synthesis at 0% unless you need it.</dd>
 <dt>The header says the AI model is not installed.</dt>
 <dd>VoiceCleaner still works with its own spectral noise reduction. Reinstalling restores the model; <span class="ui">⋯ → Models and Licenses</span> shows what is installed.</dd>
 <dt>Export asks “Your settings changed since the last Enhance”.</dt>

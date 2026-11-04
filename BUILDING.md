@@ -41,7 +41,7 @@ On macOS:
 
 * noise reduction runs on the CPU (about 30x realtime on Apple Silicon, faster than on the
   Apple GPU for this small model), and voice re-synthesis runs on the Apple GPU (about 3x
-  realtime instead of 0.6x on the CPU; *CPU only* in the menu turns this off);
+  realtime instead of 0.6x on the CPU; *CPU only* in Settings turns this off);
 * desktop audio: *System audio (all apps)* records everything the Mac plays except
   VoiceCleaner itself, through a Core Audio process tap (macOS 14.2 or newer; the small
   `vc-systemaudio` helper in the app, built from `packaging/macos/systemaudio.swift`). On
@@ -156,6 +156,18 @@ release to the installed app.
 `release/<version>/VoiceCleaner-<version>-macos-arm64.dmg` and `.zip`. Add
 `--sign "Developer ID Application: …" --notarize <profile>` for a build that opens without
 a Gatekeeper warning, and `--publish` to add it to the GitHub release.
+
+### User manual
+
+`docs/guide/VoiceCleaner-User-Manual.html` is the manual (in the app with F1, and on GitHub
+Pages). After changing it, print it to the PDF that every release attaches, with WeasyPrint
+(easiest on a Mac: `brew install pango`, then WeasyPrint in its own venv):
+
+```bash
+~/.venvs/weasyprint/bin/python tools/build_manual_pdf.py
+```
+
+`tools/screenshots.py` and `tools/update_manual_images.py` refresh its pictures first.
 
 ### FFmpeg
 

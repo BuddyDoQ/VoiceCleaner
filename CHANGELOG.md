@@ -26,6 +26,9 @@
   Reduction. The update window leads with the news ("VoiceCleaner 1.1.12 is available").
 - **Mac menu bar:** File, Edit, Playback, View, Window and Help menus with every command
   and its keys; About, Settings… and Check for Updates… are in the VoiceCleaner menu.
+  Day and Night also set the title bars, and `Tab` stops on scrolling pages show the ring.
+- **User manual corrections:** M4A and video files open on a Mac too (FFmpeg is
+  included), redo is `⇧⌘Z` on a Mac, and `F1` / `⌘?` opens the manual.
 
 ## 1.1.11
 

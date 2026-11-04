@@ -365,9 +365,8 @@ The guiding rule is *better speech, not obviously processed speech*.
   Opus and Vorbis (OGG), AIFF and CAF.
 * **Opened through the included FFmpeg:** M4A and AAC (phone voice memos), WMA, AMR, and
   the sound of video files (MP4, MOV, M4V, MKV, WebM, AVI, WMV, 3GP). The first audio track
-  is used; surround sound is mixed down to stereo. FFmpeg is included in the Windows
-  downloads. On a Mac, M4A and video files open once the Mac download includes FFmpeg as
-  well; the formats above open there already.
+  is used; surround sound is mixed down to stereo. An LGPL build of FFmpeg is
+  included in the Windows and Mac downloads.
 * Mono or stereo, 8 kHz to 384 kHz, up to 6 hours per file. Recordings too large for
   memory are processed from disk automatically. Results are saved as WAV (or MP3).
 

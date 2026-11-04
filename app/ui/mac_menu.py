@@ -10,8 +10,23 @@ File · Edit · Playback · View · Window · Help
 """
 from __future__ import annotations
 
+from PySide6.QtCore import QCoreApplication, QTranslator
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMenu
+
+
+class _SettingsTitle(QTranslator):
+    """Qt titles the PreferencesRole item with its own "Preferences..." whatever the action's
+    text; macOS has called it Settings… since Ventura. Qt looks that title up through the
+    translators, so answer it here (the role keeps the item's place and its Cmd+,)."""
+
+    def translate(self, context, source, disambiguation=None, n=-1):
+        if context == "MAC_APPLICATION_MENU" and source == "Preferences...":
+            return "Settings…"
+        return None
+
+    def isEmpty(self):
+        return False
 
 
 def _by_text(*menus: QMenu) -> dict[str, QAction]:
@@ -25,6 +40,8 @@ def _by_text(*menus: QMenu) -> dict[str, QAction]:
 
 def build_menu_bar(window) -> None:
     w = window
+    w._settings_title = _SettingsTitle(w)  # kept alive with the window
+    QCoreApplication.installTranslator(w._settings_title)
     acts = _by_text(w.session_btn.menu(), w.menu_btn.menu())
     bar = w.menuBar()
     w._menu_commands = []

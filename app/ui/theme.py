@@ -447,6 +447,8 @@ QCheckBox[focusring="true"]::indicator:checked {{ border: 2px solid {TEXT}; }}
 QTabBar[focusring="true"]::tab:selected {{ border: 2px solid {ACCENT}; border-top: 3px solid {ACCENT}; border-bottom: none; }}
 QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {ACCENT}; }}
 QTableWidget[focusring="true"], QTreeWidget[focusring="true"], QListWidget[focusring="true"] {{ border: 2px solid {ACCENT}; }}
+/* on a Mac, Tab also stops on a scrolling page (the arrow keys then scroll it) */
+QScrollArea[focusring="true"] {{ border: 2px solid {ACCENT}; border-radius: 6px; }}
 """)
 
 
@@ -478,6 +480,18 @@ def system_high_contrast() -> bool:
         return False
 
 
+def _set_window_scheme(app, preference: str) -> None:
+    """Title bars and other system-drawn parts follow Day / Night too (macOS: the app's
+    appearance). "auto" clears the override, so the system's own setting reads through again."""
+    try:
+        from PySide6.QtCore import Qt
+
+        scheme = {"day": Qt.ColorScheme.Light, "night": Qt.ColorScheme.Dark}.get(preference, Qt.ColorScheme.Unknown)
+        app.styleHints().setColorScheme(scheme)
+    except Exception:  # Qt before 6.8
+        pass
+
+
 def apply(app, preference: str = "auto", fonts: str | None = None, contrast: str | None = None) -> str:
     """Switch every colour (and the fonts, when ``fonts`` is "system" or "brand"; the contrast,
     when ``contrast`` is "auto" or "high") and restyle the running application. Returns the
@@ -488,6 +502,8 @@ def apply(app, preference: str = "auto", fonts: str | None = None, contrast: str
     if contrast is not None:
         CONTRAST = "high" if contrast == "high" else "auto"
     load_fonts()
+    if app is not None:
+        _set_window_scheme(app, preference)  # before resolve_mode: "auto" reads the system's
     MODE = resolve_mode(preference)
     HIGH = CONTRAST == "high" or system_high_contrast()
     _set(DAY if MODE == "day" else NIGHT)

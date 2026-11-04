@@ -63,6 +63,11 @@ def test_mac_menu_bar_reuses_the_same_actions(window):
     assert export in file_actions
     roles = {a.menuRole() for a in file_actions}
     assert {QAction.AboutRole, QAction.PreferencesRole, QAction.ApplicationSpecificRole} <= roles
+    # Qt titles the PreferencesRole item through the translators: the app menu says Settings…
+    from PySide6.QtCore import QCoreApplication
+
+    assert QCoreApplication.translate("MAC_APPLICATION_MENU", "Preferences...") == "Settings…"
+    assert QCoreApplication.translate("MAC_APPLICATION_MENU", "Hide %1") == "Hide %1"
     playback = [a.text() for a in menus["Playback"].actions() if a.text()]
     assert "Play / Pause" in playback and "Enhance" in playback
     assert [a.text() for a in menus["Edit"].actions()] == ["Undo", "Redo"]

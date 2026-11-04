@@ -143,6 +143,54 @@ def test_ticked_check_box_shows_a_tick_and_focus_ring_follows_keyboard():
     assert play.accessibleName() == "Pause" and play.text() == "❚❚"
 
 
+def test_scrolling_page_reached_with_tab_shows_a_ring():
+    """On a Mac, Tab stops on a scrolling page; it needs a ring like every other stop."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QLabel, QScrollArea
+
+    from app.ui import focus_ring, theme
+
+    app = QApplication.instance() or QApplication([])
+    theme.apply(app, "night")
+    scroll = QScrollArea()
+    scroll.setWidget(QLabel("page"))
+    scroll.resize(200, 120)
+    scroll.show()
+    app.processEvents()
+    plain = scroll.grab().toImage()
+    scroll.setProperty(focus_ring.PROPERTY, True)
+    focus_ring._restyle(scroll)
+    app.processEvents()
+    assert scroll.grab().toImage() != plain
+
+
+def test_title_bars_follow_day_and_night():
+    """Day and Night set the app's colour scheme (macOS: title bars); Automatic hands it back
+    to the system."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    from app.ui import theme
+
+    app = QApplication.instance() or QApplication([])
+    calls = []
+    hints = app.styleHints()
+    real = hints.setColorScheme
+    hints.setColorScheme = calls.append
+    try:
+        for pref in ("day", "night", "auto"):
+            theme.apply(app, pref)
+    finally:
+        hints.setColorScheme = real
+        theme.apply(app, "auto")
+    assert calls == [Qt.ColorScheme.Light, Qt.ColorScheme.Dark, Qt.ColorScheme.Unknown]
+
+
 @pytest.mark.parametrize("fonts", ["system", "brand"])
 def test_tab_labels_are_never_cut_short(fonts):
     """The tab bar measures its tabs with its own font; it must be the font the tabs are drawn
